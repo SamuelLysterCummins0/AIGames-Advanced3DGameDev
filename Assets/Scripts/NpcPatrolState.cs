@@ -58,7 +58,7 @@ namespace Semester2
                 shouldCheckRandomIdle = true;
             }
 
-           
+
             // This prevents jumping to random waypoints when returning from Chase/Attack
             if (navMeshAgent != null && navMeshAgent.isActiveAndEnabled && navMeshAgent.isOnNavMesh)
             {
@@ -84,7 +84,7 @@ namespace Semester2
 
             float distanceToPlayer = GetDistanceToPlayer();
 
-            
+
             // Check visual detection
             if (IsPlayerInDetectionRange())
             {
@@ -124,10 +124,9 @@ namespace Semester2
                         if (roll < config.WaypointIdleChance)
                         {
                             Debug.Log($"[{npcName}] Stopping at waypoint (rolled {roll:F2}, needed < {config.WaypointIdleChance})");
-                            float originalIdleDuration = config.IdleDuration;
-                            config.IdleDuration = config.WaypointIdleDuration;
+                            // Transition to idle state
+                            // Note: Waypoint idle uses normal idle duration - adjust config.IdleDuration if you want different timing
                             fsm?.ChangeState<NpcIdleState>();
-                            config.IdleDuration = originalIdleDuration;
                             return;
                         }
                     }
@@ -141,7 +140,7 @@ namespace Semester2
         {
             Debug.Log($"[{npcName}] <color=green>PATROL STATE EXITED (waypoint {currentWaypointIndex + 1}/{waypoints.Length})</color>");
 
-            
+
             if (navMeshAgent != null && navMeshAgent.isActiveAndEnabled && navMeshAgent.isOnNavMesh)
             {
                 navMeshAgent.isStopped = true;
