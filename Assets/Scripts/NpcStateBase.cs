@@ -150,21 +150,29 @@ namespace Semester2
         {
             this.fsm = fsm;
         }
-        
+
         /// <summary>
         /// Gets the current distance to the player.
         /// Returns float.MaxValue if player is not found.
         /// </summary>
         protected float GetDistanceToPlayer()
         {
+            // TEMPORARY DEBUG: Re-find player every frame
+            GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
+            if (playerObj != null)
+            {
+                player = playerObj.transform;
+            }
+
             if (player == null || owner == null)
             {
                 return float.MaxValue;
             }
-            
+
+            Debug.Log($"[{npcName}] Player position: {player.position}");
             return Vector3.Distance(owner.transform.position, player.position);
         }
-        
+
         /// <summary>
         /// Checks if the player is within the NPC's field of view.
         /// </summary>
