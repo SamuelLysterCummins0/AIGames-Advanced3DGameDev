@@ -3,13 +3,17 @@ using UnityEngine.AI;
 
 namespace Semester2
 {
-    
+
     public class NpcAttackState : NpcStateBase
     {
         private float lastAttackTime = 0f;
         private float shootingDistance = 4f;
         private float stateEnterTime = 0f;
         private const float MIN_STATE_TIME = 0.5f;
+
+        // Track how long we've lost line of sight
+        private float losLostTimer = 0f;
+        private const float LOS_LOST_THRESHOLD = 1f; // Seconds without LOS before leaving attack
 
         public NpcAttackState(GameObject ownerGameObject, NpcConfig config)
             : base(ownerGameObject, config)
@@ -22,6 +26,7 @@ namespace Semester2
             Debug.Log($"[{npcName}] <color=red>ATTACK STATE ENTERED</color>");
 
             stateEnterTime = Time.time;
+            losLostTimer = 0f;
 
             if (navMeshAgent != null && navMeshAgent.isActiveAndEnabled && navMeshAgent.isOnNavMesh)
             {
@@ -32,6 +37,9 @@ namespace Semester2
             if (animator != null)
             {
                 animator.SetFloat("Speed", 0f);
+                // Reset first to clear any queued triggers, then set
+                animator.ResetTrigger("Attack");
+                animator.SetTrigger("Attack");
             }
 
             lastAttackTime = Time.time - config.AttackCooldown;
@@ -47,21 +55,38 @@ namespace Semester2
                 // Only exit attack if player is truly far away (not just outside FOV)
                 // Use a larger threshold than detection range to create hysteresis
                 // This allows player to strafe, move behind NPC, etc. without breaking attack
-                float attackExitThreshold = config.DetectionRange + 2f; // 5 + 2 = 7 units
+                float attackExitThreshold = config.DetectionRange + 2f;
                 if (distanceToPlayer > attackExitThreshold)
                 {
                     Debug.Log($"[{npcName}] Player escaped attack range (dist: {distanceToPlayer:F1} > {attackExitThreshold:F1})");
-                    fsm?.ChangeState<NpcPatrolState>();
+                    fsm?.ChangeState<NpcSearchState>();
                     return;
                 }
 
                 // If player is between attack range and exit threshold, transition to chase
-                float chaseThreshold = config.AttackRange + 1.5f; // 2 + 1.5 = 3.5 units
+                float chaseThreshold = config.AttackRange + 1.5f;
                 if (distanceToPlayer > chaseThreshold && distanceToPlayer <= attackExitThreshold)
                 {
                     Debug.Log($"[{npcName}] Player moved away, chasing (dist: {distanceToPlayer:F1})");
                     fsm?.ChangeState<NpcChaseState>();
                     return;
+                }
+
+                // Track line of sight loss - only exit after sustained loss
+                if (!HasClearLineOfSight())
+                {
+                    losLostTimer += Time.deltaTime;
+                    if (losLostTimer >= LOS_LOST_THRESHOLD)
+                    {
+                        Debug.Log($"[{npcName}] Lost line of sight for {LOS_LOST_THRESHOLD}s - chasing");
+                        fsm?.ChangeState<NpcChaseState>();
+                        return;
+                    }
+                }
+                else
+                {
+                    // Can see the player again, reset timer
+                    losLostTimer = 0f;
                 }
             }
 
@@ -80,7 +105,8 @@ namespace Semester2
 
             FaceTarget();
 
-            if (Time.time >= lastAttackTime + config.AttackCooldown)
+            // Only fire if we can see the player
+            if (losLostTimer == 0f && Time.time >= lastAttackTime + config.AttackCooldown)
             {
                 ExecuteAttack();
                 lastAttackTime = Time.time;
@@ -90,6 +116,12 @@ namespace Semester2
         public override void OnExit()
         {
             Debug.Log($"[{npcName}] <color=red>ATTACK STATE EXITED</color>");
+
+            // Clear any queued attack triggers
+            if (animator != null)
+            {
+                animator.ResetTrigger("Attack");
+            }
         }
 
         private void MoveAwayFromPlayer()
@@ -103,6 +135,8 @@ namespace Semester2
 
                 navMeshAgent.isStopped = false;
                 navMeshAgent.SetDestination(retreatPosition);
+
+                if (animator != null) animator.SetFloat("Speed", navMeshAgent.speed * 0.5f);
             }
         }
 
@@ -114,6 +148,8 @@ namespace Semester2
             {
                 navMeshAgent.isStopped = false;
                 navMeshAgent.SetDestination(player.position);
+
+                if (animator != null) animator.SetFloat("Speed", navMeshAgent.speed * 0.5f);
             }
         }
 
@@ -123,6 +159,8 @@ namespace Semester2
             {
                 navMeshAgent.isStopped = true;
                 navMeshAgent.velocity = Vector3.zero;
+
+                if (animator != null) animator.SetFloat("Speed", 0f);
             }
         }
 
@@ -150,6 +188,7 @@ namespace Semester2
 
             if (animator != null)
             {
+                animator.ResetTrigger("Attack");
                 animator.SetTrigger("Attack");
             }
         }

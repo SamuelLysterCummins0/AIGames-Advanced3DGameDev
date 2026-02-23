@@ -152,16 +152,22 @@ namespace Semester2
 
         private bool HasReachedWaypoint()
         {
-            if (!navMeshAgent.pathPending)
+            if (navMeshAgent.pathPending) return false;
+
+            if (navMeshAgent.remainingDistance <= config.WaypointReachedThreshold)
             {
-                if (navMeshAgent.remainingDistance <= config.WaypointReachedThreshold)
-                {
-                    if (!navMeshAgent.hasPath || navMeshAgent.velocity.sqrMagnitude == 0f)
-                    {
-                        return true;
-                    }
-                }
+                if (!navMeshAgent.hasPath || navMeshAgent.velocity.sqrMagnitude == 0f)
+                    return true;
             }
+
+            // If the path is partial (destination blocked by carved obstacle),
+            // treat it as reached so the NPC doesn't freeze waiting for an unreachable point.
+            if (navMeshAgent.pathStatus == NavMeshPathStatus.PathPartial &&
+                navMeshAgent.velocity.sqrMagnitude == 0f)
+            {
+                return true;
+            }
+
             return false;
         }
 

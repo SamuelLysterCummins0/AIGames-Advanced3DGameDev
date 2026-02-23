@@ -12,16 +12,16 @@ namespace Semester2
         // Detection ranges
         public float DetectionRange { get; set; }
         public float AttackRange { get; set; }
-        
+
         // Field of View settings
         public float FieldOfViewAngle { get; set; }
         public bool RequireLineOfSight { get; set; }
         public LayerMask ObstacleLayerMask { get; set; }
-        
+
         // Line of sight raycast heights
         public float NpcEyeHeight { get; set; }
         public float PlayerCenterHeight { get; set; }
-        
+
         // Audio detection settings
         public float HearingRange { get; set; }
         public float WalkNoiseLevel { get; set; }
@@ -29,15 +29,15 @@ namespace Semester2
         public float MinNoiseThreshold { get; set; }
         public bool UseOcclusionForSound { get; set; }
         public float SoundOcclusionMultiplier { get; set; }
-        
+
         // Movement speeds
         public float WalkSpeed { get; set; }
         public float RunSpeed { get; set; }
-        
+
         // State-specific timings
         public float IdleDuration { get; set; }
         public float AttackCooldown { get; set; }
-        
+
         // Navigation parameters
         public float WaypointReachedThreshold { get; set; }
         public float AttackRotationSpeed { get; set; }
@@ -102,21 +102,21 @@ namespace Semester2
         // Owner GameObject reference
         protected GameObject owner;
         protected string npcName;
-        
+
         // Cached components
         protected NavMeshAgent navMeshAgent;
         protected Animator animator;
-        
+
         // FSM reference for autonomous state transitions
         protected MinimalisticFSM fsm;
-        
+
         // Shared data for all NPC states
         protected Transform player;
         protected NpcConfig config;
-        
+
         // Audio detection components
         protected PlayerAudioEmitter playerAudioEmitter;
-        
+
         /// <summary>
         /// Constructor that caches common references and components.
         /// </summary>
@@ -127,11 +127,11 @@ namespace Semester2
             owner = ownerGameObject;
             npcName = owner.name;
             this.config = config;
-            
+
             // Cache commonly used components
             navMeshAgent = owner.GetComponent<NavMeshAgent>();
             animator = owner.GetComponentInChildren<Animator>();
-            
+
             // Try to find the player
             GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
             if (playerObj != null)
@@ -141,7 +141,7 @@ namespace Semester2
                 playerAudioEmitter = playerObj.GetComponent<PlayerAudioEmitter>();
             }
         }
-        
+
         /// <summary>
         /// Provides the state with a reference to its FSM.
         /// This allows states to trigger their own transitions.
@@ -154,14 +154,19 @@ namespace Semester2
         /// <summary>
         /// Gets the current distance to the player.
         /// Returns float.MaxValue if player is not found.
+        /// Uses cached player reference, only re-searches if lost.
         /// </summary>
         protected float GetDistanceToPlayer()
         {
-            // TEMPORARY DEBUG: Re-find player every frame
-            GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
-            if (playerObj != null)
+            // Only re-search if we lost the reference 
+            if (player == null)
             {
-                player = playerObj.transform;
+                GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
+                if (playerObj != null)
+                {
+                    player = playerObj.transform;
+                    playerAudioEmitter = playerObj.GetComponent<PlayerAudioEmitter>();
+                }
             }
 
             if (player == null || owner == null)
@@ -169,7 +174,6 @@ namespace Semester2
                 return float.MaxValue;
             }
 
-            Debug.Log($"[{npcName}] Player position: {player.position}");
             return Vector3.Distance(owner.transform.position, player.position);
         }
 
@@ -183,17 +187,17 @@ namespace Semester2
             {
                 return false;
             }
-            
+
             // Calculate direction to player
             Vector3 directionToPlayer = (player.position - owner.transform.position).normalized;
-            
+
             // Calculate the angle between NPC's forward direction and direction to player
             float angleToPlayer = Vector3.Angle(owner.transform.forward, directionToPlayer);
-            
+
             // Check if angle is within half of the FOV (since Angle returns absolute value)
             return angleToPlayer <= config.FieldOfViewAngle / 2f;
         }
-        
+
         /// <summary>
         /// Checks if there's a clear line of sight to the player (no obstacles blocking).
         /// Uses raycasting to detect occlusion.
@@ -205,13 +209,13 @@ namespace Semester2
             {
                 return false;
             }
-            
+
             // Calculate direction and distance to player
             Vector3 npcEyePosition = owner.transform.position + Vector3.up * config.NpcEyeHeight;
             Vector3 playerPosition = player.position + Vector3.up * config.PlayerCenterHeight;
             Vector3 directionToPlayer = playerPosition - npcEyePosition;
             float distanceToPlayer = directionToPlayer.magnitude;
-            
+
             // Perform raycast to check for obstacles
             RaycastHit hit;
             if (Physics.Raycast(npcEyePosition, directionToPlayer.normalized, out hit, distanceToPlayer, config.ObstacleLayerMask))
@@ -219,11 +223,11 @@ namespace Semester2
                 // Something is blocking the view
                 return false;
             }
-            
+
             // No obstacles blocking, clear line of sight
             return true;
         }
-        
+
         /// <summary>
         /// Checks if the NPC has complete line of sight to the player.
         /// Combines distance, field of view, and occlusion checks.
@@ -237,29 +241,29 @@ namespace Semester2
             {
                 return false;
             }
-            
+
             // If line of sight is not required, just use distance
             if (!config.RequireLineOfSight)
             {
                 return true;
             }
-            
+
             // Check if player is in field of view
             if (!IsPlayerInFieldOfView())
             {
                 return false;
             }
-            
+
             // Check if there are obstacles blocking the view
             if (!HasClearLineOfSight())
             {
                 return false;
             }
-            
+
             // All checks passed - player is detectable
             return true;
         }
-        
+
         /// <summary>
         /// Checks if player is within detection range with line of sight.
         /// </summary>
@@ -267,7 +271,7 @@ namespace Semester2
         {
             return HasLineOfSightToPlayer(config.DetectionRange);
         }
-        
+
         /// <summary>
         /// Checks if player is within attack range with line of sight.
         /// </summary>
@@ -275,7 +279,7 @@ namespace Semester2
         {
             return HasLineOfSightToPlayer(config.AttackRange);
         }
-        
+
         /// <summary>
         /// Checks if the NPC can hear the player based on 3D spatial audio.
         /// Takes into account distance, noise level, and optional occlusion.
@@ -285,36 +289,36 @@ namespace Semester2
         protected bool CanHearPlayer(out Vector3 heardPosition)
         {
             heardPosition = Vector3.zero;
-            
+
             // Cannot hear if player or audio emitter is not found
             if (player == null || owner == null || playerAudioEmitter == null)
             {
                 return false;
             }
-            
+
             // Get current distance to player
             float distance = GetDistanceToPlayer();
-            
+
             // Player is too far away to hear
             if (distance > config.HearingRange)
             {
                 return false;
             }
-            
+
             // Get the current noise level from the player
             float currentNoiseLevel = playerAudioEmitter.CurrentNoiseLevel;
-            
+
             // Player is not making enough noise
             if (currentNoiseLevel < config.MinNoiseThreshold)
             {
                 return false;
             }
-            
+
             // Calculate sound attenuation based on distance
             // Sound decreases with distance (inverse square law approximation)
             float distanceAttenuation = 1f - (distance / config.HearingRange);
             float effectiveNoiseLevel = currentNoiseLevel * distanceAttenuation;
-            
+
             // Check for sound occlusion (walls, obstacles blocking sound)
             if (config.UseOcclusionForSound)
             {
@@ -322,7 +326,7 @@ namespace Semester2
                 Vector3 playerSoundPosition = player.position + Vector3.up * config.PlayerCenterHeight;
                 Vector3 directionToPlayer = playerSoundPosition - npcEarPosition;
                 float distanceToPlayer = directionToPlayer.magnitude;
-                
+
                 // Check if there are obstacles between NPC and player
                 RaycastHit hit;
                 if (Physics.Raycast(npcEarPosition, directionToPlayer.normalized, out hit, distanceToPlayer, config.ObstacleLayerMask))
@@ -331,17 +335,17 @@ namespace Semester2
                     effectiveNoiseLevel *= config.SoundOcclusionMultiplier;
                 }
             }
-            
+
             // Check if the final noise level is above threshold
             if (effectiveNoiseLevel >= config.MinNoiseThreshold)
             {
                 heardPosition = player.position;
                 return true;
             }
-            
+
             return false;
         }
-        
+
         /// <summary>
         /// Simple overload for checking if player can be heard without getting the position.
         /// </summary>
@@ -351,7 +355,24 @@ namespace Semester2
             Vector3 heardPosition;
             return CanHearPlayer(out heardPosition);
         }
-        
+
+        /// <summary>
+        /// Returns the cached player transform (for debug display).
+        /// </summary>
+        public Transform Player => player;
+
+        /// <summary>
+        /// Returns the NavMeshAgent destination (for debug display).
+        /// </summary>
+        public Vector3 GetCurrentDestination()
+        {
+            if (navMeshAgent != null && navMeshAgent.isActiveAndEnabled && navMeshAgent.isOnNavMesh && navMeshAgent.hasPath)
+            {
+                return navMeshAgent.destination;
+            }
+            return owner != null ? owner.transform.position : Vector3.zero;
+        }
+
         // Abstract methods that child classes must implement
         public abstract void OnEnter();
         public abstract void OnUpdate();

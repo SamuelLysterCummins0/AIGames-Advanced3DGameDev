@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: e655f3e9a2337db428013f9166de8906
+timeCreated: 1461022445
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 60960
+  packageName: Forklift
+  packageVersion: 1.0
+  assetPath: Assets/Forklift/Forklift.prefab
+  uploadId: 113592

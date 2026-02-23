@@ -4,15 +4,29 @@ using UnityEngine.AI;
 namespace Semester2
 {
     /// <summary>
-    /// NPC Chase State - FIXED version with hysteresis to prevent state flickering
+    /// NPC Chase State - Chases the player, tracks last known position.
+    /// When player escapes detection, NPC keeps running to last known position
+    /// before transitioning to Search state.
     /// </summary>
     public class NpcChaseState : NpcStateBase
     {
         private float stateEnterTime = 0f;
-        private const float MIN_STATE_TIME = 0.3f; // Minimum time before allowing state transitions
+        private const float MIN_STATE_TIME = 0.3f;
 
         private float lastDestinationUpdateTime = 0f;
-        private const float DESTINATION_UPDATE_INTERVAL = 0.2f; // Update destination every 0.2 seconds
+        private const float DESTINATION_UPDATE_INTERVAL = 0.2f;
+
+        // Track where we last saw the player
+        private Vector3 lastKnownPlayerPosition;
+
+        // Has the NPC lost sight of the player?
+        private bool playerLost = false;
+        private Vector3 chaseTargetPosition; // Where the NPC runs to after losing player
+
+        /// <summary>
+        /// Public access to last known player position for the Search state.
+        /// </summary>
+        public Vector3 LastKnownPlayerPosition => lastKnownPlayerPosition;
 
         public NpcChaseState(GameObject ownerGameObject, NpcConfig config)
             : base(ownerGameObject, config)
@@ -24,6 +38,13 @@ namespace Semester2
             Debug.Log($"[{npcName}] <color=yellow>CHASE STATE ENTERED</color>");
 
             stateEnterTime = Time.time;
+            playerLost = false;
+
+            // Store initial last known position
+            if (player != null)
+            {
+                lastKnownPlayerPosition = player.position;
+            }
 
             // Resume NavMeshAgent and set run speed
             if (navMeshAgent != null && navMeshAgent.isActiveAndEnabled && navMeshAgent.isOnNavMesh)
@@ -48,36 +69,93 @@ namespace Semester2
             if (timeSinceEnter > MIN_STATE_TIME)
             {
                 // Use attack range - buffer to enter (prevents flickering)
-                float enterAttackThreshold = config.AttackRange - 0.5f; // 0.5 unit buffer
-                if (distanceToPlayer <= enterAttackThreshold)
+                // Must also have clear line of sight - can't attack through walls
+                float enterAttackThreshold = config.AttackRange - 0.5f;
+                if (distanceToPlayer <= enterAttackThreshold && HasClearLineOfSight())
                 {
                     Debug.Log($"[{npcName}] Close enough to attack (dist: {distanceToPlayer:F1} <= {enterAttackThreshold:F1})");
                     fsm?.ChangeState<NpcAttackState>();
                     return;
                 }
 
-                // Check if player escaped
-                // Use detection range + buffer to stay in chase longer
-                // Once in chase, only use distance check (not FOV) so NPC continues chasing even if player moves behind
-                float exitDetectionThreshold = config.DetectionRange + 1f; // 1 unit buffer (reduced from 2)
+                // Check if player escaped detection range
+                float exitDetectionThreshold = config.DetectionRange + 1f;
 
-                // Exit only if player is beyond threshold - don't require FOV/hearing checks
-                // This allows chase to continue even when player is behind the NPC
-                if (distanceToPlayer > exitDetectionThreshold)
+                if (!playerLost && distanceToPlayer > exitDetectionThreshold)
                 {
-                    Debug.Log($"[{npcName}] Lost track of player - too far away (dist: {distanceToPlayer:F1} > {exitDetectionThreshold:F1})");
-                    fsm?.ChangeState<NpcPatrolState>();
+                    // Player just escaped - keep running in the direction we were already heading
+                    // This is more natural than beelining to an exact position
+                    playerLost = true;
+
+                    float continueRunDistance = 8f;
+                    Vector3 forwardDirection = owner.transform.forward;
+                    chaseTargetPosition = owner.transform.position + forwardDirection * continueRunDistance;
+
+                    // Make sure the target is on the NavMesh
+                    NavMeshHit hit;
+                    if (NavMesh.SamplePosition(chaseTargetPosition, out hit, 3f, NavMesh.AllAreas))
+                    {
+                        chaseTargetPosition = hit.position;
+                    }
+                    else
+                    {
+                        // If forward point isn't on NavMesh (e.g. wall ahead), just search from here
+                        chaseTargetPosition = owner.transform.position;
+                    }
+
+                    Debug.Log($"[{npcName}] Lost sight of player - continuing forward to search area");
+
+                    if (navMeshAgent != null && navMeshAgent.isActiveAndEnabled && navMeshAgent.isOnNavMesh)
+                    {
+                        navMeshAgent.SetDestination(chaseTargetPosition);
+                    }
+                }
+
+                // If player lost, check if we've reached the chase target
+                if (playerLost)
+                {
+                    // Only resume chase if we can actually SEE or HEAR the player again
+                    // Not just distance - prevents chasing through walls
+                    if (IsPlayerInDetectionRange())
+                    {
+                        playerLost = false;
+                        Debug.Log($"[{npcName}] Player spotted again - resuming chase");
+                    }
+                    else
+                    {
+                        Vector3 heardPosition;
+                        if (CanHearPlayer(out heardPosition))
+                        {
+                            playerLost = false;
+                            Debug.Log($"[{npcName}] Heard player again - resuming chase");
+                        }
+                    }
+
+                    // If still lost, check if we've arrived at the chase target
+                    if (playerLost && navMeshAgent != null && !navMeshAgent.pathPending
+                        && navMeshAgent.remainingDistance <= config.WaypointReachedThreshold)
+                    {
+                        Debug.Log($"[{npcName}] Reached chase target - starting search");
+                        fsm?.ChangeState<NpcSearchState>();
+                        return;
+                    }
+
+                    // Don't update destination while running to chase target
                     return;
                 }
             }
 
+            // Keep updating last known player position while we can see them
+            if (player != null && !playerLost)
+            {
+                lastKnownPlayerPosition = player.position;
+            }
+
             // Continue chasing: follow player, update navigation
-            // Only update destination periodically to prevent NavMesh path recalculation spam
             if (navMeshAgent != null && navMeshAgent.isActiveAndEnabled && navMeshAgent.isOnNavMesh && player != null)
             {
                 if (Time.time - lastDestinationUpdateTime > DESTINATION_UPDATE_INTERVAL)
                 {
-                    // Only update if not already calculating a path
                     if (!navMeshAgent.pathPending)
                     {
                         navMeshAgent.SetDestination(player.position);

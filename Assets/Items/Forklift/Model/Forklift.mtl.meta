@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: b5c3c35867a2b8c42a1ebfdba9526f31
+timeCreated: 1461022630
+licenseType: Store
+DefaultImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 60960
+  packageName: Forklift
+  packageVersion: 1.0
+  assetPath: Assets/Forklift/Model/Forklift.mtl
+  uploadId: 113592

@@ -1,4 +1,4 @@
-using UnityEngine;
+ï»¿using UnityEngine;
 using UnityEngine.InputSystem;
 
 namespace Semester2
@@ -25,69 +25,69 @@ namespace Semester2
         [Header("NPC Detection Settings")]
         [Tooltip("Distance at which the NPC detects and starts chasing the player")]
         [SerializeField] private float detectionRange = 5f;
-        
+
         [Tooltip("Distance at which the NPC can attack the player")]
         [SerializeField] private float attackRange = 2f;
-        
+
         [Header("NPC Vision Settings")]
-        [Tooltip("Field of view angle in degrees (e.g., 90 = 90° cone in front)")]
+        [Tooltip("Field of view angle in degrees (e.g., 90 = 90ï¿½ cone in front)")]
         [SerializeField] private float fieldOfViewAngle = 90f;
-        
+
         [Tooltip("If true, player must be in FOV and not occluded to be detected")]
         [SerializeField] private bool requireLineOfSight = true;
-        
+
         [Tooltip("Layer mask for obstacles that block line of sight")]
         [SerializeField] private LayerMask obstacleLayerMask = ~0; // All layers by default
-        
+
         [Tooltip("Height offset for NPC eye position for line of sight raycasts")]
         [SerializeField] private float npcEyeHeight = 1.6f;
-        
+
         [Tooltip("Height offset for player center mass for line of sight raycasts")]
         [SerializeField] private float playerCenterHeight = 1f;
 
         [Header("NPC Audio Detection Settings")]
         [Tooltip("Maximum distance at which the NPC can hear the player")]
         [SerializeField] private float hearingRange = 8f;
-        
+
         [Tooltip("Minimum noise threshold for detection (0-1 scale)")]
         [SerializeField] private float minNoiseThreshold = 0.2f;
-        
+
         [Tooltip("If true, obstacles will muffle sound")]
         [SerializeField] private bool useOcclusionForSound = true;
-        
+
         [Tooltip("Multiplier for sound when occluded (0 = completely blocked, 1 = no effect)")]
         [SerializeField] private float soundOcclusionMultiplier = 0.5f;
 
         [Header("NPC Movement Settings")]
         [Tooltip("Speed when patrolling between waypoints")]
         [SerializeField] private float walkSpeed = 5f;
-        
+
         [Tooltip("Speed when chasing the player")]
         [SerializeField] private float runSpeed = 9f;
-        
+
         [Tooltip("Distance threshold to consider waypoint as reached")]
         [SerializeField] private float waypointReachedThreshold = 0.5f;
 
         [Header("NPC Behavior Settings")]
         [Tooltip("How long the NPC stays idle before starting to patrol")]
         [SerializeField] private float idleDuration = 2f;
-        
+
         [Tooltip("Time between attack executions")]
         [SerializeField] private float attackCooldown = 1.5f;
-        
+
         [Tooltip("How fast the NPC rotates to face the target during attack")]
         [SerializeField] private float attackRotationSpeed = 10f;
 
         [Header("Patrol Settings")]
         [Tooltip("Array of waypoints for the NPC to patrol between")]
         [SerializeField] private Transform[] patrolWaypoints;
-        
+
         [Tooltip("If true, automatically create waypoints around the NPC's starting position")]
         [SerializeField] private bool autoGenerateWaypoints = false;
-        
+
         [Tooltip("Radius for auto-generated waypoints")]
         [SerializeField] private float waypointRadius = 10f;
-        
+
         [Tooltip("Number of waypoints to auto-generate")]
         [SerializeField] private int autoWaypointCount = 4;
 
@@ -124,31 +124,50 @@ namespace Semester2
         [Header("Debug Visualization")]
         [Tooltip("Show field of view cone in scene view")]
         [SerializeField] private bool showFieldOfView = true;
-        
+
         [Tooltip("Show detection raycast in scene view")]
         [SerializeField] private bool showDetectionRaycast = true;
 
         [Header("Input Settings (Optional - for manual testing)")]
         [Tooltip("Input action for forcing Idle state (default: Keyboard 1)")]
         [SerializeField] private InputAction idleStateInput;
-        
+
         [Tooltip("Input action for forcing Patrol state (default: Keyboard 2)")]
         [SerializeField] private InputAction patrolStateInput;
-        
+
         [Tooltip("Input action for forcing Chase state (default: Keyboard 3)")]
         [SerializeField] private InputAction chaseStateInput;
-        
+
         [Tooltip("Input action for forcing Attack state (default: Keyboard 4)")]
         [SerializeField] private InputAction attackStateInput;
 
         // The FSM instance for this NPC
         private MinimalisticFSM fsm;
-        
+
         // Reference to patrol state for waypoint setup
         private NpcPatrolState patrolState;
-        
+
+        // Reference to search state for gizmo drawing
+        private NpcSearchState searchState;
+
         // Cached player reference for gizmo drawing
         private Transform player;
+
+        /// <summary>
+        /// Public read-only access to the current state name (used by debug overlay).
+        /// </summary>
+        public string CurrentStateName
+        {
+            get
+            {
+                if (fsm == null || fsm.CurrentState == null) return "None";
+
+                // Get the class name and strip "Npc" prefix and "State" suffix for clean display
+                string fullName = fsm.CurrentState.GetType().Name;
+                fullName = fullName.Replace("Npc", "").Replace("State", "");
+                return fullName;
+            }
+        }
 
         /// <summary>
         /// Initialize the FSM and register all states.
@@ -208,7 +227,7 @@ namespace Semester2
             // Register all possible states this NPC can be in
             // Pass configuration so states can use the configured values
             fsm.AddState(new NpcIdleState(gameObject, config));
-            
+
             // Create patrol state and configure waypoints
             patrolState = new NpcPatrolState(gameObject, config);
             if (patrolWaypoints != null && patrolWaypoints.Length > 0)
@@ -216,9 +235,13 @@ namespace Semester2
                 patrolState.SetWaypoints(patrolWaypoints);
             }
             fsm.AddState(patrolState);
-            
+
             fsm.AddState(new NpcChaseState(gameObject, config));
             fsm.AddState(new NpcAttackState(gameObject, config));
+
+            // Store reference for gizmo drawing
+            searchState = new NpcSearchState(gameObject, config);
+            fsm.AddState(searchState);
 
             // Set the initial state
             fsm.ChangeState<NpcIdleState>();
@@ -231,11 +254,11 @@ namespace Semester2
         {
             GameObject waypointParent = new GameObject($"{gameObject.name}_Waypoints");
             waypointParent.transform.position = transform.position;
-            
+
             patrolWaypoints = new Transform[autoWaypointCount];
-            
+
             float angleStep = 360f / autoWaypointCount;
-            
+
             for (int i = 0; i < autoWaypointCount; i++)
             {
                 // Calculate position in a circle
@@ -245,15 +268,15 @@ namespace Semester2
                     0f,
                     Mathf.Sin(angle) * waypointRadius
                 );
-                
+
                 // Create waypoint GameObject
                 GameObject waypoint = new GameObject($"Waypoint_{i + 1}");
                 waypoint.transform.position = waypointPosition;
                 waypoint.transform.parent = waypointParent.transform;
-                
+
                 patrolWaypoints[i] = waypoint.transform;
             }
-            
+
             Debug.Log($"[{gameObject.name}] Auto-generated {autoWaypointCount} waypoints at radius {waypointRadius}m");
         }
 
@@ -305,19 +328,19 @@ namespace Semester2
                 idleStateInput.performed -= OnIdleStateInput;
                 idleStateInput.Disable();
             }
-            
+
             if (patrolStateInput != null)
             {
                 patrolStateInput.performed -= OnPatrolStateInput;
                 patrolStateInput.Disable();
             }
-            
+
             if (chaseStateInput != null)
             {
                 chaseStateInput.performed -= OnChaseStateInput;
                 chaseStateInput.Disable();
             }
-            
+
             if (attackStateInput != null)
             {
                 attackStateInput.performed -= OnAttackStateInput;
@@ -394,32 +417,32 @@ namespace Semester2
             // Draw detection range (yellow)
             Gizmos.color = Color.yellow;
             Gizmos.DrawWireSphere(transform.position, detectionRange);
-            
+
             // Draw attack range (red)
             Gizmos.color = Color.red;
             Gizmos.DrawWireSphere(transform.position, attackRange);
-            
+
             // Draw hearing range (orange)
             Gizmos.color = new Color(1f, 0.5f, 0f, 0.5f); // Orange
             Gizmos.DrawWireSphere(transform.position, hearingRange);
-            
+
             // Draw field of view cone
             if (showFieldOfView)
             {
                 DrawFieldOfViewGizmo();
             }
-            
+
             // Draw line of sight to player
             if (showDetectionRaycast && player != null)
             {
                 DrawLineOfSightGizmo();
             }
-            
+
             // Draw waypoints and patrol path
             if (patrolWaypoints != null && patrolWaypoints.Length > 0)
             {
                 Gizmos.color = Color.green;
-                
+
                 // Draw each waypoint
                 foreach (Transform waypoint in patrolWaypoints)
                 {
@@ -428,7 +451,7 @@ namespace Semester2
                         Gizmos.DrawWireSphere(waypoint.position, 0.5f);
                     }
                 }
-                
+
                 // Draw lines between waypoints to show patrol path
                 Gizmos.color = Color.cyan;
                 for (int i = 0; i < patrolWaypoints.Length; i++)
@@ -443,8 +466,57 @@ namespace Semester2
                     }
                 }
             }
+
+            // Draw search state points when NPC is searching
+            if (Application.isPlaying && searchState != null && searchState.IsSearching && fsm != null && fsm.CurrentState is NpcSearchState)
+            {
+                Vector3[] points = searchState.SearchPoints;
+                int currentIndex = searchState.CurrentSearchIndex;
+
+                if (points != null)
+                {
+                    // Draw search radius circle
+                    Gizmos.color = new Color(0f, 1f, 1f, 0.2f); // Semi-transparent cyan
+                    Gizmos.DrawWireSphere(searchState.LastKnownPosition, 8f);
+
+                    // Draw last known position marker (larger, magenta)
+                    Gizmos.color = Color.magenta;
+                    Gizmos.DrawWireSphere(searchState.LastKnownPosition, 0.6f);
+                    Gizmos.DrawLine(searchState.LastKnownPosition, searchState.LastKnownPosition + Vector3.up * 2f);
+
+                    for (int i = 0; i < points.Length; i++)
+                    {
+                        // Visited points = dark cyan, current = bright yellow, upcoming = orange
+                        if (i < currentIndex)
+                        {
+                            Gizmos.color = new Color(0f, 0.5f, 0.5f, 0.5f); // Dark cyan (visited)
+                        }
+                        else if (i == currentIndex)
+                        {
+                            Gizmos.color = Color.yellow; // Current target
+                        }
+                        else
+                        {
+                            Gizmos.color = new Color(1f, 0.5f, 0f); // Orange (upcoming)
+                        }
+
+                        // Draw point sphere
+                        Gizmos.DrawWireSphere(points[i], 0.4f);
+
+                        // Draw vertical line at each point for visibility
+                        Gizmos.DrawLine(points[i], points[i] + Vector3.up * 1.5f);
+
+                        // Draw lines between consecutive search points
+                        if (i < points.Length - 1)
+                        {
+                            Gizmos.color = new Color(0f, 1f, 1f, 0.4f); // Cyan line
+                            Gizmos.DrawLine(points[i], points[i + 1]);
+                        }
+                    }
+                }
+            }
         }
-        
+
         /// <summary>
         /// Draws the field of view cone in the scene view.
         /// </summary>
@@ -453,13 +525,13 @@ namespace Semester2
             float halfFOV = fieldOfViewAngle / 2f;
             Vector3 leftBoundary = Quaternion.Euler(0, -halfFOV, 0) * transform.forward * detectionRange;
             Vector3 rightBoundary = Quaternion.Euler(0, halfFOV, 0) * transform.forward * detectionRange;
-            
+
             Gizmos.color = new Color(0, 1, 0, 0.2f); // Semi-transparent green
-            
+
             // Draw the boundary lines
             Gizmos.DrawLine(transform.position, transform.position + leftBoundary);
             Gizmos.DrawLine(transform.position, transform.position + rightBoundary);
-            
+
             // Draw arc for the field of view
             Vector3 previousPoint = transform.position + leftBoundary;
             int segments = 20;
@@ -472,7 +544,7 @@ namespace Semester2
                 previousPoint = point;
             }
         }
-        
+
         /// <summary>
         /// Draws the line of sight raycast to the player.
         /// Green if visible, red if occluded.
@@ -483,15 +555,15 @@ namespace Semester2
             Vector3 playerPosition = player.position + Vector3.up * playerCenterHeight;
             Vector3 directionToPlayer = playerPosition - npcEyePosition;
             float distanceToPlayer = directionToPlayer.magnitude;
-            
+
             // Check for occlusion
             RaycastHit hit;
             bool isOccluded = Physics.Raycast(npcEyePosition, directionToPlayer.normalized, out hit, distanceToPlayer, obstacleLayerMask);
-            
+
             // Draw line - green if clear, red if occluded
             Gizmos.color = isOccluded ? Color.red : Color.green;
             Gizmos.DrawLine(npcEyePosition, playerPosition);
-            
+
             // Draw small sphere at player position
             Gizmos.DrawWireSphere(playerPosition, 0.2f);
         }
