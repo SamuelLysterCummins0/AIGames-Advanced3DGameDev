@@ -121,6 +121,14 @@ namespace Semester2
         [Range(0f, 1f)]
         [SerializeField] private float directionChangeChance = 0.3f;
 
+        [Header("Investigate State Settings")]
+        [Tooltip("How long the NPC searches the area around the power box before fixing it (seconds)")]
+        [SerializeField] private float investigateLookDuration = 7f;
+
+        [Tooltip("Fallback fix duration if no Fix animation tag is set on the Animator (seconds). " +
+                 "Must be LONGER than your Fix animation clip. E.g. if the clip is 9.7 s, set this to 12+.")]
+        [SerializeField] private float investigateFixDuration = 12f;
+
         [Header("Debug Visualization")]
         [Tooltip("Show field of view cone in scene view")]
         [SerializeField] private bool showFieldOfView = true;
@@ -146,6 +154,13 @@ namespace Semester2
 
         // Reference to patrol state for waypoint setup
         private NpcPatrolState patrolState;
+
+        // Reference to investigate state so we can pass the target box before switching
+        private NpcInvestigateState investigateState;
+
+        // Tracks the most recently activated power box so the NPC can return to it
+        // after being interrupted (chased away). Cleared when the box is fixed.
+        private PowerBoxInteractable pendingPowerBox;
 
         // Reference to search state for gizmo drawing
         private NpcSearchState searchState;
@@ -221,7 +236,9 @@ namespace Semester2
                 WaypointIdleChance = waypointIdleChance,
                 WaypointIdleDuration = waypointIdleDuration,
                 EnableRandomDirectionChange = enableRandomDirectionChange,
-                DirectionChangeChance = directionChangeChance
+                DirectionChangeChance = directionChangeChance,
+                InvestigateLookDuration = investigateLookDuration,
+                InvestigateFixDuration = investigateFixDuration
             };
 
             // Register all possible states this NPC can be in
@@ -242,6 +259,10 @@ namespace Semester2
             // Store reference for gizmo drawing
             searchState = new NpcSearchState(gameObject, config);
             fsm.AddState(searchState);
+
+            // Investigate state - store reference so we can set the target box before switching
+            investigateState = new NpcInvestigateState(gameObject, config);
+            fsm.AddState(investigateState);
 
             // Set the initial state
             fsm.ChangeState<NpcIdleState>();
@@ -303,6 +324,10 @@ namespace Semester2
                 attackStateInput = new InputAction("AttackState", binding: "<Keyboard>/4");
             }
 
+            // Subscribe to power box events so NPC automatically investigates
+            PowerBoxInteractable.OnPowerBoxActivated += OnPowerBoxActivated;
+            PowerBoxInteractable.OnPowerBoxFixed      += OnPowerBoxFixed;
+
             // Subscribe to input events
             idleStateInput.performed += OnIdleStateInput;
             patrolStateInput.performed += OnPatrolStateInput;
@@ -322,6 +347,9 @@ namespace Semester2
         /// </summary>
         void OnDisable()
         {
+            PowerBoxInteractable.OnPowerBoxActivated -= OnPowerBoxActivated;
+            PowerBoxInteractable.OnPowerBoxFixed      -= OnPowerBoxFixed;
+
             // Safely unsubscribe from input events with null checks
             if (idleStateInput != null)
             {
@@ -349,13 +377,35 @@ namespace Semester2
         }
 
         /// <summary>
+        /// Reapply the investigate state's manual rotation after Unity's Animator
+        /// root-motion step. Root motion is processed between Update and LateUpdate,
+        /// so any rotation we set in Update gets silently overwritten by the Animator
+        /// before the frame is rendered. Running here guarantees our rotation wins.
+        /// </summary>
+        void LateUpdate()
+        {
+            investigateState?.ReapplyRotation();
+        }
+
+        /// <summary>
         /// Update the FSM. States now handle their own transitions autonomously.
         /// </summary>
         void Update()
         {
-            // Update the current state's logic
-            // States will handle their own transition logic based on game conditions
             fsm?.Update();
+
+            // If a power box is still broken and the NPC has settled back into a calm
+            // state (patrol or idle), re-trigger the investigate state so the NPC
+            // returns to fix it even after being interrupted by the player.
+            if (pendingPowerBox != null && pendingPowerBox.IsActivated && fsm != null)
+            {
+                if (fsm.IsInState<NpcPatrolState>() || fsm.IsInState<NpcIdleState>())
+                {
+                    Debug.Log($"[{name}] Power box still active - resuming investigation!");
+                    investigateState.SetTargetBox(pendingPowerBox);
+                    fsm.ChangeState<NpcInvestigateState>();
+                }
+            }
         }
 
         // ===== INPUT SYSTEM CALLBACKS =====
@@ -392,6 +442,33 @@ namespace Semester2
         private void OnAttackStateInput(InputAction.CallbackContext context)
         {
             fsm?.ChangeState<NpcAttackState>();
+        }
+
+        /// <summary>
+        /// Called when any power box is activated. Stores the box as pending so the
+        /// NPC can return to it after being interrupted, then switches to investigate.
+        /// </summary>
+        private void OnPowerBoxActivated(PowerBoxInteractable box)
+        {
+            if (investigateState == null) return;
+
+            pendingPowerBox = box;
+            investigateState.SetTargetBox(box);
+            fsm?.ChangeState<NpcInvestigateState>();
+            Debug.Log($"[{name}] Heading to investigate power box disturbance!");
+        }
+
+        /// <summary>
+        /// Called when a power box is fully repaired. Clears the pending reference
+        /// so the NPC doesn't keep trying to return to a box that's already fixed.
+        /// </summary>
+        private void OnPowerBoxFixed(PowerBoxInteractable box)
+        {
+            if (pendingPowerBox == box)
+            {
+                pendingPowerBox = null;
+                Debug.Log($"[{name}] Power box fixed - no longer pending investigation.");
+            }
         }
 
         /// <summary>

@@ -35,22 +35,17 @@ namespace Semester2
         {
             Debug.Log($"[{npcName}] <color=green>PATROL STATE ENTERED</color>");
 
-            stateEnterTime = Time.time; // Track when we entered this state
+            stateEnterTime = Time.time;
 
-            // Resume NavMeshAgent and set walk speed
             if (navMeshAgent != null && navMeshAgent.isActiveAndEnabled && navMeshAgent.isOnNavMesh)
             {
                 navMeshAgent.isStopped = false;
                 navMeshAgent.speed = config.WalkSpeed;
             }
 
-            // Play walk animation
             if (animator != null)
-            {
                 animator.SetFloat("Speed", config.WalkSpeed);
-            }
 
-            // Schedule next random idle if enabled
             if (config.EnableRandomIdleDuringPatrol)
             {
                 float randomInterval = Random.Range(config.RandomIdleMinInterval, config.RandomIdleMaxInterval);
@@ -58,20 +53,35 @@ namespace Semester2
                 shouldCheckRandomIdle = true;
             }
 
-
-            // This prevents jumping to random waypoints when returning from Chase/Attack
-            if (navMeshAgent != null && navMeshAgent.isActiveAndEnabled && navMeshAgent.isOnNavMesh)
+            // Always snap to the closest waypoint when (re-)entering patrol.
+            // This means an NPC that just lost the player on the far side of the map
+            // won't walk all the way back to where it was before the chase started.
+            if (waypoints != null && waypoints.Length > 0)
             {
-                if (!navMeshAgent.hasPath || navMeshAgent.remainingDistance < config.WaypointReachedThreshold)
+                int closestIndex = FindClosestWaypointIndex();
+
+                // If we're already standing on the closest waypoint (e.g. re-entering
+                // patrol after an idle stop that fired AT a waypoint), advance one step
+                // forward. Without this, MoveToNextWaypoint() sends the NPC to the
+                // waypoint it is already at, HasReachedWaypoint() fires immediately,
+                // and if the idle-stop chance rolls true again we get an infinite loop.
+                if (waypoints[closestIndex] != null)
                 {
-                    Debug.Log($"[{npcName}] No path or reached destination, moving to next waypoint");
-                    MoveToNextWaypoint();
+                    float distToClosest = Vector3.Distance(
+                        owner.transform.position,
+                        waypoints[closestIndex].position);
+
+                    if (distToClosest <= config.WaypointReachedThreshold + 0.5f)
+                        closestIndex = (closestIndex + 1) % waypoints.Length;
                 }
-                else
-                {
-                    Debug.Log($"[{npcName}] Resuming patrol to waypoint {currentWaypointIndex + 1}/{waypoints.Length} (distance: {navMeshAgent.remainingDistance:F1})");
-                }
+
+                currentWaypointIndex = closestIndex;
+                waypointDirection = 1;
+                Debug.Log($"[{npcName}] Resuming patrol — heading to waypoint {currentWaypointIndex + 1}/{waypoints.Length}");
             }
+
+            if (navMeshAgent != null && navMeshAgent.isActiveAndEnabled && navMeshAgent.isOnNavMesh)
+                MoveToNextWaypoint();
         }
 
         public override void OnUpdate()
@@ -81,9 +91,6 @@ namespace Semester2
             // Only check transitions after minimum state time to prevent flickering
             if (timeSinceEnter < MIN_STATE_TIME)
                 return;
-
-            float distanceToPlayer = GetDistanceToPlayer();
-
 
             // Check visual detection
             if (IsPlayerInDetectionRange())
@@ -138,7 +145,7 @@ namespace Semester2
 
         public override void OnExit()
         {
-            Debug.Log($"[{npcName}] <color=green>PATROL STATE EXITED (waypoint {currentWaypointIndex + 1}/{waypoints.Length})</color>");
+            Debug.Log($"[{npcName}] <color=green>PATROL STATE EXITED (waypoint {currentWaypointIndex + 1}/{waypoints?.Length ?? 0})</color>");
 
 
             if (navMeshAgent != null && navMeshAgent.isActiveAndEnabled && navMeshAgent.isOnNavMesh)
@@ -169,6 +176,31 @@ namespace Semester2
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Returns the index of the waypoint closest to the NPC's current world position.
+        /// Used when re-entering patrol after a chase so the NPC doesn't travel back
+        /// across the map to resume from where it was before the chase started.
+        /// </summary>
+        private int FindClosestWaypointIndex()
+        {
+            int   closestIndex    = 0;
+            float closestDistance = float.MaxValue;
+
+            for (int i = 0; i < waypoints.Length; i++)
+            {
+                if (waypoints[i] == null) continue;
+
+                float dist = Vector3.Distance(owner.transform.position, waypoints[i].position);
+                if (dist < closestDistance)
+                {
+                    closestDistance = dist;
+                    closestIndex    = i;
+                }
+            }
+
+            return closestIndex;
         }
 
         private void MoveToNextWaypoint()

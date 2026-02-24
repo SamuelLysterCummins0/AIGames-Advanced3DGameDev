@@ -53,6 +53,10 @@ namespace Semester2
         public bool EnableRandomDirectionChange { get; set; }
         public float DirectionChangeChance { get; set; }
 
+        // Investigate state settings
+        public float InvestigateLookDuration { get; set; }
+        public float InvestigateFixDuration { get; set; }
+
         /// <summary>
         /// Creates default configuration values.
         /// </summary>
@@ -87,7 +91,9 @@ namespace Semester2
                 WaypointIdleChance = 0.7f,
                 WaypointIdleDuration = 2f,
                 EnableRandomDirectionChange = false,
-                DirectionChangeChance = 0.3f
+                DirectionChangeChance = 0.3f,
+                InvestigateLookDuration = 7f,
+                InvestigateFixDuration = 12f   // Must exceed Fix animation clip length
             };
         }
     }
