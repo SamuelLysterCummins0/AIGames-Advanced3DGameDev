@@ -54,6 +54,11 @@ namespace Semester2
         private IState currentState;
 
         /// <summary>
+        /// The state that was active before the current one. Null on first transition.
+        /// </summary>
+        private IState previousState;
+
+        /// <summary>
         /// Dictionary storing all registered states, indexed by their Type.
         /// This allows fast lookup when changing states.
         /// </summary>
@@ -63,6 +68,12 @@ namespace Semester2
         /// Public read-only access to the current state.
         /// </summary>
         public IState CurrentState => currentState;
+
+        /// <summary>
+        /// Public read-only access to the previous state.
+        /// Useful for states that need to know where they came from (e.g. patrol resuming after chase vs idle).
+        /// </summary>
+        public IState PreviousState => previousState;
 
         /// <summary>
         /// Registers a new state to the FSM.
@@ -113,6 +124,9 @@ namespace Semester2
 
             // Exit the current state (if one exists)
             currentState?.OnExit();
+
+            // Remember where we came from before switching
+            previousState = currentState;
 
             // Switch to the new state
             currentState = states[stateType];

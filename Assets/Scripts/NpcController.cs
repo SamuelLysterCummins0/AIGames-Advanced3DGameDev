@@ -384,7 +384,8 @@ namespace Semester2
         /// </summary>
         void LateUpdate()
         {
-            investigateState?.ReapplyRotation();
+            if (fsm != null && fsm.IsInState<NpcInvestigateState>())
+                investigateState?.ReapplyRotation();
         }
 
         /// <summary>

@@ -53,18 +53,18 @@ namespace Semester2
                 shouldCheckRandomIdle = true;
             }
 
-            // Always snap to the closest waypoint when (re-)entering patrol.
-            // This means an NPC that just lost the player on the far side of the map
-            // won't walk all the way back to where it was before the chase started.
-            if (waypoints != null && waypoints.Length > 0)
+            // Only snap to the closest waypoint when returning from Chase or Search.
+            // If coming from Idle (e.g. a waypoint stop or random idle), we just
+            // continue from the waypoint index that was already set.
+            bool cameFromChaseOrSearch = fsm?.PreviousState is NpcChaseState
+                                      || fsm?.PreviousState is NpcSearchState;
+
+            if (cameFromChaseOrSearch && waypoints != null && waypoints.Length > 0)
             {
                 int closestIndex = FindClosestWaypointIndex();
 
-                // If we're already standing on the closest waypoint (e.g. re-entering
-                // patrol after an idle stop that fired AT a waypoint), advance one step
-                // forward. Without this, MoveToNextWaypoint() sends the NPC to the
-                // waypoint it is already at, HasReachedWaypoint() fires immediately,
-                // and if the idle-stop chance rolls true again we get an infinite loop.
+                // If we're already on the closest waypoint, step forward one so
+                // MoveToNextWaypoint() doesn't immediately re-reach it on the same frame.
                 if (waypoints[closestIndex] != null)
                 {
                     float distToClosest = Vector3.Distance(
@@ -77,7 +77,7 @@ namespace Semester2
 
                 currentWaypointIndex = closestIndex;
                 waypointDirection = 1;
-                Debug.Log($"[{npcName}] Resuming patrol — heading to waypoint {currentWaypointIndex + 1}/{waypoints.Length}");
+                Debug.Log($"[{npcName}] Resuming patrol after chase/search — heading to waypoint {currentWaypointIndex + 1}/{waypoints.Length}");
             }
 
             if (navMeshAgent != null && navMeshAgent.isActiveAndEnabled && navMeshAgent.isOnNavMesh)
