@@ -788,6 +788,7 @@ MonoBehaviour:
   behindDotThreshold: -0.3
   snapOffset: 0.7
   animationDuration: 6
+  playerBodyHideDuration: 2.5
   takedownTrigger: Takedown
   takedownKey: 101
   cameraRoot: {fileID: 3581519659755707413}

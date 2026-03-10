@@ -17,10 +17,15 @@ namespace Semester2
     ///   - Takedown handling
     ///
     /// BT tree structure (priority order, root is a Selector):
-    ///   1. Threat  — [PlayerVisible] → Selector → [InRange → Attack] | Chase
-    ///   2. PowerBox — [PowerBoxActive] → Investigate
-    ///   3. Search   — CooldownDecorator → [HasLastKnownPosition → Search]
-    ///   4. Patrol   — always Running (fallback)
+    ///   1. Threat      — [PlayerVisible] → Selector → [InRange → Attack] | Chase
+    ///   2. AudioSearch — [PlayerHeard]   → Search (tracks live sound, fans out when silent)
+    ///   3. PostSearch  — CooldownDecorator(5 s) → [HasLastKnownPosition → Search]
+    ///   4. PowerBox    — [PowerBoxActive &amp;&amp; !LkpFromChase] → Investigate
+    ///   5. Patrol      — always Running (fallback)
+    ///
+    /// AudioSearch sits above PowerBox so hearing the player interrupts Investigate.
+    /// When the player is newly heard the post-chase cooldown is reset so audio
+    /// cues are never blocked by a leftover cooldown from a previous search.
     /// </summary>
     public class NpcController : MonoBehaviour
     {
@@ -67,7 +72,8 @@ namespace Semester2
         [SerializeField] private float investigateLookDuration = 7f;
         [SerializeField] private float investigateFixDuration  = 12f;
 
-        [Header("Death Audio")]
+        [Header("Death")]
+        [SerializeField] private string      npcDeathTrigger   = "Death"; // must match Animator parameter
         [SerializeField] private AudioSource deathAudioSource;
         [SerializeField] private AudioClip   fallClip;
         [SerializeField] private float       fallSoundDelay = 1.8f;
@@ -105,6 +111,7 @@ namespace Semester2
 
         private NpcBlackboard       _blackboard;
         private BtNode              _btRoot;
+        private BtCooldown          _postChaseSearchCooldown; // kept so we can reset it on new audio cues
         private BtActionInvestigate _investigateAction; // kept so LateUpdate can call ReapplyRotation
         private bool                _isDead = false;
         private Transform           _player;
@@ -182,16 +189,26 @@ namespace Semester2
 
                 _blackboard.LastKnownPlayerPosition = _player.position;
                 _blackboard.HasLastKnownPosition    = true;
+                _blackboard.LkpFromChase            = true; // visual contact — defer Investigate
             }
 
             Vector3 heardAt;
             bool canHear = CanHearPlayer(out heardAt);
+
+            // Reset the post-chase search cooldown the moment the player is newly heard.
+            // Without this, a 5 s cooldown left over from a previous search would block
+            // the NPC from reacting to fresh footsteps.
+            bool wasHeard = _blackboard.PlayerHeard;
+            if (canHear && !wasHeard)
+                _postChaseSearchCooldown?.ResetCooldown();
+
             _blackboard.PlayerHeard = canHear;
 
             if (canHear && !canSee)
             {
                 _blackboard.LastKnownPlayerPosition = heardAt;
                 _blackboard.HasLastKnownPosition    = true;
+                // LkpFromChase stays as-is — hearing alone doesn't mark it as a chase LKP
             }
 
             if (_player != null) _lastPlayerPos = _player.position;
@@ -233,33 +250,47 @@ namespace Semester2
                 threatResponse
             });
 
+            // ── Audio search branch — higher priority than PowerBox ───────────────
+            // When the player is heard, this fires immediately and overtakes whatever
+            // was running, including Investigate. BtActionSearch tracks the live heard
+            // position while PlayerHeard == true, then fans out when sound stops.
+            // PostChaseSearch (below) picks up the fan search once this branch fails.
+            var audioSearchBranch = new BtSequence(new BtNode[]
+            {
+                new BtCheckPlayerHeard(_blackboard),
+                new BtActionSearch(ctx)
+            });
+
+            // ── Post-chase search with cooldown decorator ─────────────────────────
+            // Handles searching after audio stops or after losing sight of the player.
+            // The 5 s cooldown prevents instantly re-entering search. It is reset by
+            // UpdatePerception whenever the player is newly heard.
+            var searchSequence = new BtSequence(new BtNode[]
+            {
+                new BtCheckHasLastKnownPosition(_blackboard),
+                new BtActionSearch(ctx)
+            });
+            _postChaseSearchCooldown = new BtCooldown(searchSequence, 5f);
+
             // ── Power-box investigation branch ────────────────────────────────────
+            // Only reached when neither search branch has work to do. LkpFromChase
+            // defers this until any post-chase search clears the visual LKP.
             var powerBoxBranch = new BtSequence(new BtNode[]
             {
                 new BtCheckPowerBoxActive(_blackboard),
                 _investigateAction
             });
 
-            // ── Search branch with cooldown decorator ─────────────────────────────
-            // CooldownDecorator blocks re-entry for 5 s after a failed search.
-            var searchSequence = new BtSequence(new BtNode[]
-            {
-                new BtCheckHasLastKnownPosition(_blackboard),
-                new BtActionSearch(ctx)
-            });
-            var searchBranch = new BtCooldown(searchSequence, 5f);
-
             // ── Patrol fallback (always Running) ──────────────────────────────────
             var patrolBranch = new BtActionPatrol(ctx, patrolWaypoints);
 
             // ── Root Selector — re-evaluates from top every tick ──────────────────
-            // This re-evaluation IS the interrupt mechanism: when playerVisible
-            // becomes true mid-patrol, the Threat branch wins on the very next tick.
             _btRoot = new BtSelector(new BtNode[]
             {
                 threatBranch,
-                powerBoxBranch,
-                searchBranch,
+                audioSearchBranch,        // heard → interrupt everything (incl. Investigate)
+                _postChaseSearchCooldown, // fan search after sound/sight lost (cooldown resets on audio)
+                powerBoxBranch,           // no active search → fix the box
                 patrolBranch
             });
         }
@@ -368,7 +399,8 @@ namespace Semester2
                 anim.SetBool("IsFixing", false);
                 anim.SetFloat("Speed", 0f);
                 anim.ResetTrigger("Attack");
-                anim.SetTrigger("Death");
+                if (!string.IsNullOrEmpty(npcDeathTrigger))
+                    anim.SetTrigger(npcDeathTrigger);
             }
 
             if (fallClip != null && deathAudioSource != null)

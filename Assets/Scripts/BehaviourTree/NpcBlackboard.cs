@@ -18,6 +18,11 @@ namespace Semester2
         public bool HasLastKnownPosition;
         public Vector3 LastKnownPlayerPosition;
 
+        // True when HasLastKnownPosition was set by visual contact (chasing).
+        // False when set only by audio (hearing). BtCheckPowerBoxActive uses this
+        // to block Investigate only after a real chase, not after a brief footstep.
+        public bool LkpFromChase;
+
         // The direction the player was moving when last detected.
         // Search uses this to fan points forward instead of searching randomly.
         public Vector3 LastKnownPlayerMoveDir;

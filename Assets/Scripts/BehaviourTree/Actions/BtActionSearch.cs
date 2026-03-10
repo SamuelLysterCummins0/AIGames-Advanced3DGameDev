@@ -30,6 +30,14 @@ namespace Semester2
         private float     _lookTimer     = 0f;
         private Quaternion _targetLook;
 
+        // Sound-tracking state.
+        // While the player is being heard we navigate directly toward the live heard
+        // position (updated every 0.2 s) instead of committing to static search points.
+        // When hearing stops, _wasHearingLastTick triggers a fan-search reset from the
+        // final heard position.
+        private bool  _wasHearingLastTick   = false;
+        private float _lastSoundTrackUpdate = 0f;
+
         public BtActionSearch(NpcBtContext ctx)
         {
             _ctx = ctx;
@@ -40,14 +48,34 @@ namespace Semester2
             Debug.Log($"[{_ctx.NpcName}] <color=cyan>BT: Search entered</color>");
             _ctx.Blackboard.ActiveNodeName = "Search";
 
-            _searchTimer   = 0f;
-            _currentIndex  = 0;
-            _movingToPoint = true;
-            _pauseTimer    = 0f;
-            _lookTimer     = 0f;
+            // BtActionInvestigate.OnExit is never called when the Selector abandons
+            // it mid-Fixing phase — so the fixing animation and the agent rotation
+            // lock are never restored. We clean both up here since Search takes over.
+            if (_ctx.Anim  != null) _ctx.Anim.SetBool("IsFixing", false);
+            if (_ctx.Agent != null) _ctx.Agent.updateRotation = true; // re-enable so NPC turns to face movement direction
 
-            GenerateSearchPoints(_ctx.Blackboard.LastKnownPlayerPosition);
-            MoveToCurrentPoint();
+            _searchTimer          = 0f;
+            _currentIndex         = 0;
+            _movingToPoint        = true;
+            _pauseTimer           = 0f;
+            _lookTimer            = 0f;
+            _wasHearingLastTick   = false;
+            _lastSoundTrackUpdate = 0f;
+
+            if (_ctx.Blackboard.PlayerHeard)
+            {
+                // Player is actively making noise right now — track the live sound
+                // position instead of generating static search points that would
+                // already be stale if the player keeps moving.
+                _wasHearingLastTick = true;
+                NavigateToSound();
+            }
+            else
+            {
+                // Sound has already stopped — fan out from the last heard position
+                GenerateSearchPoints(_ctx.Blackboard.LastKnownPlayerPosition);
+                MoveToCurrentPoint();
+            }
         }
 
         protected override NodeState OnTick()
@@ -60,9 +88,37 @@ namespace Semester2
             {
                 Debug.Log($"[{_ctx.NpcName}] Search timed out.");
                 _ctx.Blackboard.HasLastKnownPosition = false;
+                _ctx.Blackboard.LkpFromChase         = false;
                 return NodeState.Failure;
             }
 
+            // ── Sound-tracking mode ────────────────────────────────────────────────
+            // While the player is actively heard, navigate toward the live sound
+            // position each tick. This fixes the bug where the NPC only moved to
+            // the first footstep heard and ignored all subsequent ones.
+            if (_ctx.Blackboard.PlayerHeard)
+            {
+                _wasHearingLastTick = true;
+                NavigateToSound();
+                return NodeState.Running;
+            }
+
+            // Sound just stopped — switch from live tracking to fan search.
+            // This fires exactly once on the frame hearing ends.
+            if (_wasHearingLastTick)
+            {
+                Debug.Log($"[{_ctx.NpcName}] Sound lost — switching to fan search.");
+                _wasHearingLastTick = false;
+                _searchTimer   = 0f;   // full timeout from now so the fan gets time
+                _currentIndex  = 0;
+                _movingToPoint = true;
+                _pauseTimer    = 0f;
+                _lookTimer     = 0f;
+                GenerateSearchPoints(_ctx.Blackboard.LastKnownPlayerPosition);
+                MoveToCurrentPoint();
+            }
+
+            // ── Fan search ─────────────────────────────────────────────────────────
             if (_movingToPoint)
             {
                 if (HasReachedDestination())
@@ -91,6 +147,7 @@ namespace Semester2
                     {
                         Debug.Log($"[{_ctx.NpcName}] All search points checked - player not found.");
                         _ctx.Blackboard.HasLastKnownPosition = false;
+                        _ctx.Blackboard.LkpFromChase         = false;
                         return NodeState.Failure;
                     }
                     _movingToPoint = true;
@@ -167,6 +224,25 @@ namespace Semester2
                         : center;
                 }
             }
+        }
+
+        /// <summary>
+        /// Navigates toward the latest heard position (updated at most every 0.2 s
+        /// to avoid recalculating the NavMesh path every frame).
+        /// </summary>
+        private void NavigateToSound()
+        {
+            if (_ctx.Agent == null || !_ctx.Agent.isActiveAndEnabled || !_ctx.Agent.isOnNavMesh) return;
+
+            _ctx.Agent.isStopped = false;
+            _ctx.Agent.speed     = _ctx.Config.RunSpeed;
+            if (_ctx.Anim != null) _ctx.Anim.SetFloat("Speed", _ctx.Config.RunSpeed);
+
+            // Rate-limit path recalculation
+            if (Time.time - _lastSoundTrackUpdate < 0.2f) return;
+            _lastSoundTrackUpdate = Time.time;
+
+            _ctx.Agent.SetDestination(_ctx.Blackboard.LastKnownPlayerPosition);
         }
 
         private void MoveToCurrentPoint()

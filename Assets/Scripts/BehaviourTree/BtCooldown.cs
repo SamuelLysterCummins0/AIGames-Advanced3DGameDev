@@ -34,5 +34,15 @@ namespace Semester2
 
             return result;
         }
+
+        /// <summary>
+        /// Clears the active cooldown so the child can run immediately next tick.
+        /// Called by NpcController when the player is newly heard — we don't want
+        /// a previous search cooldown to block a fresh audio-triggered search.
+        /// </summary>
+        public void ResetCooldown()
+        {
+            _nextAllowedTime = 0f;
+        }
     }
 }
