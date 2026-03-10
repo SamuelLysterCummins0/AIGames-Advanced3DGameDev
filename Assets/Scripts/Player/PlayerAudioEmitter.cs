@@ -139,14 +139,6 @@ namespace Semester2
 
             lastPosition = transform.position;
 
-            // Log what movement system was detected
-            string detectedSystem = "None";
-            if (characterController != null) detectedSystem = "CharacterController";
-            else if (rb != null) detectedSystem = "Rigidbody";
-            else if (navMeshAgent != null) detectedSystem = "NavMeshAgent";
-
-            Debug.Log($"[{gameObject.name}] PlayerAudioEmitter initialized with {detectedSystem}");
-
             // Cache and configure AudioSource
             audioSource = GetComponent<AudioSource>();
 
@@ -179,8 +171,6 @@ namespace Semester2
             // Don't loop (footsteps are individual sounds)
             audioSource.loop = false;
 
-            Debug.Log($"[{gameObject.name}] AudioSource configured for 3D spatial audio " +
-                      $"(minDist: {minDistance}, maxDist: {maxDistance}, rolloff: {rolloffMode})");
         }
 
         /// <summary>

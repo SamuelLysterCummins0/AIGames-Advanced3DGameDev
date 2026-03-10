@@ -66,8 +66,6 @@ namespace Semester2
             navObstacle.enabled = true;
             navObstacle.carving = true;
             navObstacle.carveOnlyStationary = true;
-
-            Debug.Log($"[{name}] Barrel settled - now a NavMesh obstacle");
         }
 
         /// <summary>

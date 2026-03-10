@@ -94,16 +94,13 @@ namespace Semester2
                 headingToCenter = false;
                 currentOuterIndex = (currentOuterIndex + 1) % outerPoints.Length;
                 currentTarget = outerPoints[currentOuterIndex];
-                Debug.Log($"[{name}] Heading to outer point {currentOuterIndex + 1}");
             }
             else
             {
                 // Just arrived at outer point - return to center
                 headingToCenter = true;
                 currentTarget = centerPoint;
-                // Face idle direction when arriving at a point
                 transform.rotation = Quaternion.Euler(0f, idleRotationY, 0f);
-                Debug.Log($"[{name}] Returning to center");
             }
 
             navMeshAgent.SetDestination(currentTarget.position);
@@ -137,7 +134,6 @@ namespace Semester2
                 if (oldest != null)
                 {
                     oldest.DissolveAndDestroy();
-                    Debug.Log($"[{name}] Max barrels reached - dissolving oldest");
                 }
             }
 
@@ -147,8 +143,6 @@ namespace Semester2
             DroppedBarrel newBarrel = newBarrelObj.GetComponent<DroppedBarrel>();
             if (newBarrel != null)
                 spawnedBarrels.Enqueue(newBarrel);
-
-            Debug.Log($"[{name}] Barrel dropped at {spawnPos} ({spawnedBarrels.Count}/{maxBarrels})");
         }
     }
 }

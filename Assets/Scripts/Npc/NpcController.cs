@@ -1,649 +1,497 @@
-﻿using UnityEngine;
-using UnityEngine.InputSystem;
+using System.Collections;
+using UnityEngine;
+using UnityEngine.AI;
 
 namespace Semester2
 {
     /// <summary>
-    /// Example implementation of a minimalistic FSM for NPC behavior.
-    /// Demonstrates automatic state transitions based on player proximity and line of sight.
-    /// 
-    /// States now handle their own transitions autonomously based on game conditions.
-    /// This example script only handles setup, input testing, and visualization.
-    /// 
-    /// States:
-    /// - Idle: Default state, transitions to Patrol after a delay
-    /// - Patrol: Moving between waypoints, monitors for player
-    /// - Chase: Player detected within detection range
-    /// - Attack: Player within attack range
-    /// 
-    /// Input System:
-    /// - Uses the new Unity Input System for manual state testing
-    /// - Keyboard 1-4 keys to manually trigger state changes
+    /// Drives the NPC using the custom pure-C# Behaviour Tree (Option A).
+    ///
+    /// This component owns:
+    ///   - All perception logic (CanSeePlayer, CanHearPlayer)
+    ///   - The NpcConfig built from inspector fields
+    ///   - The NpcBlackboard updated each frame before the BT ticks
+    ///   - Power box event handling (writes to Blackboard)
+    ///   - The BT root node (BtSelector) and the full tree construction
+    ///   - LateUpdate rotation reapplication for the Investigate action
+    ///   - Takedown handling
+    ///
+    /// BT tree structure (priority order, root is a Selector):
+    ///   1. Threat  — [PlayerVisible] → Selector → [InRange → Attack] | Chase
+    ///   2. PowerBox — [PowerBoxActive] → Investigate
+    ///   3. Search   — CooldownDecorator → [HasLastKnownPosition → Search]
+    ///   4. Patrol   — always Running (fallback)
     /// </summary>
     public class NpcController : MonoBehaviour
     {
         [Header("NPC Detection Settings")]
-        [Tooltip("Distance at which the NPC detects and starts chasing the player")]
-        [SerializeField] private float detectionRange = 5f;
-
-        [Tooltip("Distance at which the NPC can attack the player")]
-        [SerializeField] private float attackRange = 2f;
+        [SerializeField] private float detectionRange = 10f;
+        [SerializeField] private float attackRange    = 2.5f;
 
         [Header("NPC Vision Settings")]
-        [Tooltip("Field of view angle in degrees (e.g., 90 = 90� cone in front)")]
-        [SerializeField] private float fieldOfViewAngle = 90f;
-
-        [Tooltip("If true, player must be in FOV and not occluded to be detected")]
-        [SerializeField] private bool requireLineOfSight = true;
-
-        [Tooltip("Layer mask for obstacles that block line of sight")]
-        [SerializeField] private LayerMask obstacleLayerMask = ~0; // All layers by default
-
-        [Tooltip("Height offset for NPC eye position for line of sight raycasts")]
-        [SerializeField] private float npcEyeHeight = 1.6f;
-
-        [Tooltip("Height offset for player center mass for line of sight raycasts")]
-        [SerializeField] private float playerCenterHeight = 1f;
+        [SerializeField] private float     fieldOfViewAngle   = 90f;
+        [SerializeField] private bool      requireLineOfSight = true;
+        [SerializeField] private LayerMask obstacleLayerMask  = ~0;
+        [SerializeField] private float     npcEyeHeight       = 1.6f;
+        [SerializeField] private float     playerCenterHeight = 1f;
 
         [Header("NPC Audio Detection Settings")]
-        [Tooltip("Maximum distance at which the NPC can hear the player")]
-        [SerializeField] private float hearingRange = 8f;
-
-        [Tooltip("Minimum noise threshold for detection (0-1 scale)")]
-        [SerializeField] private float minNoiseThreshold = 0.2f;
-
-        [Tooltip("If true, obstacles will muffle sound")]
-        [SerializeField] private bool useOcclusionForSound = true;
-
-        [Tooltip("Multiplier for sound when occluded (0 = completely blocked, 1 = no effect)")]
-        [SerializeField] private float soundOcclusionMultiplier = 0.5f;
+        [SerializeField] private float hearingRange         = 10f;
+        [SerializeField] private float minNoiseThreshold    = 0.2f;
+        [SerializeField] private bool  useOcclusionForSound = true;
+        [SerializeField] private float soundOcclusionMult   = 0.5f;
 
         [Header("NPC Movement Settings")]
-        [Tooltip("Speed when patrolling between waypoints")]
-        [SerializeField] private float walkSpeed = 5f;
-
-        [Tooltip("Speed when chasing the player")]
-        [SerializeField] private float runSpeed = 9f;
-
-        [Tooltip("Distance threshold to consider waypoint as reached")]
+        [SerializeField] private float walkSpeed                = 3.5f;
+        [SerializeField] private float runSpeed                 = 7f;
         [SerializeField] private float waypointReachedThreshold = 0.5f;
 
         [Header("NPC Behavior Settings")]
-        [Tooltip("How long the NPC stays idle before starting to patrol")]
-        [SerializeField] private float idleDuration = 2f;
-
-        [Tooltip("Time between attack executions")]
-        [SerializeField] private float attackCooldown = 1.5f;
-
-        [Tooltip("How fast the NPC rotates to face the target during attack")]
+        [SerializeField] private float idleDuration        = 2f;
+        [SerializeField] private float attackCooldown      = 1.5f;
         [SerializeField] private float attackRotationSpeed = 10f;
 
         [Header("Patrol Settings")]
-        [Tooltip("Array of waypoints for the NPC to patrol between")]
         [SerializeField] private Transform[] patrolWaypoints;
+        [SerializeField] private bool        autoGenerateWaypoints = false;
+        [SerializeField] private float       waypointRadius        = 10f;
+        [SerializeField] private int         autoWaypointCount     = 4;
 
-        [Tooltip("If true, automatically create waypoints around the NPC's starting position")]
-        [SerializeField] private bool autoGenerateWaypoints = false;
-
-        [Tooltip("Radius for auto-generated waypoints")]
-        [SerializeField] private float waypointRadius = 10f;
-
-        [Tooltip("Number of waypoints to auto-generate")]
-        [SerializeField] private int autoWaypointCount = 4;
-
-        [Header("Random Behavior Settings")]
-        [Tooltip("Enable random idle breaks during patrol (stops randomly between waypoints)")]
-        [SerializeField] private bool enableRandomIdleDuringPatrol = true;
-
-        [Tooltip("Minimum time before random idle can occur (seconds)")]
-        [SerializeField] private float randomIdleMinInterval = 10f;
-
-        [Tooltip("Maximum time before random idle occurs (seconds)")]
-        [SerializeField] private float randomIdleMaxInterval = 20f;
-
-        [Tooltip("How long the NPC stays idle when randomly stopping (seconds)")]
-        [SerializeField] private float randomIdleDuration = 3f;
-
-        [Tooltip("Enable pausing at each waypoint (more predictable than random idle)")]
-        [SerializeField] private bool enableWaypointIdleStop = true;
-
-        [Tooltip("Chance of stopping at each waypoint (0-1, e.g., 0.7 = 70% chance)")]
+        [Header("Waypoint Idle Settings")]
+        [SerializeField] private bool  enableWaypointIdleStop = true;
         [Range(0f, 1f)]
-        [SerializeField] private float waypointIdleChance = 0.7f;
-
-        [Tooltip("How long to pause at waypoints (seconds)")]
-        [SerializeField] private float waypointIdleDuration = 2f;
-
-        [Tooltip("Enable random direction changes (patrol backwards occasionally)")]
-        [SerializeField] private bool enableRandomDirectionChange = false;
-
-        [Tooltip("Chance of changing direction at each waypoint (0-1, e.g., 0.3 = 30% chance)")]
-        [Range(0f, 1f)]
-        [SerializeField] private float directionChangeChance = 0.3f;
+        [SerializeField] private float waypointIdleChance     = 0.7f;
+        [SerializeField] private float waypointIdleDuration   = 2f;
 
         [Header("Investigate State Settings")]
-        [Tooltip("How long the NPC searches the area around the power box before fixing it (seconds)")]
         [SerializeField] private float investigateLookDuration = 7f;
+        [SerializeField] private float investigateFixDuration  = 12f;
 
-        [Tooltip("Fallback fix duration if no Fix animation tag is set on the Animator (seconds). " +
-                 "Must be LONGER than your Fix animation clip. E.g. if the clip is 9.7 s, set this to 12+.")]
-        [SerializeField] private float investigateFixDuration = 12f;
+        [Header("Death Audio")]
+        [SerializeField] private AudioSource deathAudioSource;
+        [SerializeField] private AudioClip   fallClip;
+        [SerializeField] private float       fallSoundDelay = 1.8f;
 
         [Header("Debug Visualization")]
-        [Tooltip("Show field of view cone in scene view")]
-        [SerializeField] private bool showFieldOfView = true;
-
-        [Tooltip("Show detection raycast in scene view")]
+        [SerializeField] private bool showFieldOfView      = true;
         [SerializeField] private bool showDetectionRaycast = true;
 
-        [Header("Input Settings (Optional - for manual testing)")]
-        [Tooltip("Input action for forcing Idle state (default: Keyboard 1)")]
-        [SerializeField] private InputAction idleStateInput;
+        // ── Public API ─────────────────────────────────────────────────────────────
 
-        [Tooltip("Input action for forcing Patrol state (default: Keyboard 2)")]
-        [SerializeField] private InputAction patrolStateInput;
+        /// <summary>Config built from inspector fields. Action scripts read speeds, ranges, etc.</summary>
+        public NpcConfig Config { get; private set; }
 
-        [Tooltip("Input action for forcing Chase state (default: Keyboard 3)")]
-        [SerializeField] private InputAction chaseStateInput;
+        /// <summary>Shared blackboard — NpcDebugOverlay reads perception values from here.</summary>
+        public NpcBlackboard Blackboard => _blackboard;
 
-        [Tooltip("Input action for forcing Attack state (default: Keyboard 4)")]
-        [SerializeField] private InputAction attackStateInput;
+        /// <summary>The serialized patrol waypoints — used by BtActionPatrol.</summary>
+        public Transform[] PatrolWaypoints => patrolWaypoints;
 
-        // The FSM instance for this NPC
-        private MinimalisticFSM fsm;
+        /// <summary>The player transform cached at Start.</summary>
+        public Transform PlayerTransform => _player;
 
-        // Reference to patrol state for waypoint setup
-        private NpcPatrolState patrolState;
-
-        // Reference to investigate state so we can pass the target box before switching
-        private NpcInvestigateState investigateState;
-
-        // Tracks the most recently activated power box so the NPC can return to it
-        // after being interrupted (chased away). Cleared when the box is fixed.
-        private PowerBoxInteractable pendingPowerBox;
-
-        // Reference to search state for gizmo drawing
-        private NpcSearchState searchState;
-
-        // Cached player reference for gizmo drawing
-        private Transform player;
+        /// <summary>Current distance to the player (live calculation).</summary>
+        public float DistanceToPlayer => _player != null
+            ? Vector3.Distance(transform.position, _player.position)
+            : float.MaxValue;
 
         /// <summary>
-        /// Public read-only access to the current state name (used by debug overlay).
+        /// The power box being investigated.
+        /// Set by OnPowerBoxActivated, cleared by BtActionInvestigate on repair.
         /// </summary>
-        public string CurrentStateName
-        {
-            get
-            {
-                if (fsm == null || fsm.CurrentState == null) return "None";
+        public PowerBoxInteractable TargetPowerBox { get; set; }
 
-                // Get the class name and strip "Npc" prefix and "State" suffix for clean display
-                string fullName = fsm.CurrentState.GetType().Name;
-                fullName = fullName.Replace("Npc", "").Replace("State", "");
-                return fullName;
-            }
-        }
+        // ── Private fields ─────────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Initialize the FSM and register all states.
-        /// States now receive configuration parameters for all behavior values.
-        /// </summary>
+        private NpcBlackboard       _blackboard;
+        private BtNode              _btRoot;
+        private BtActionInvestigate _investigateAction; // kept so LateUpdate can call ReapplyRotation
+        private bool                _isDead = false;
+        private Transform           _player;
+        private PlayerAudioEmitter  _audioEmitter;
+        private Vector3             _lastPlayerPos;
+
+        // ── Unity lifecycle ────────────────────────────────────────────────────────
+
         void Start()
         {
-            // Auto-generate waypoints if enabled and none are set
-            if (autoGenerateWaypoints && (patrolWaypoints == null || patrolWaypoints.Length == 0))
+            Config = new NpcConfig
             {
-                GenerateWaypoints();
-            }
+                DetectionRange           = detectionRange,
+                AttackRange              = attackRange,
+                FieldOfViewAngle         = fieldOfViewAngle,
+                RequireLineOfSight       = requireLineOfSight,
+                ObstacleLayerMask        = obstacleLayerMask,
+                NpcEyeHeight             = npcEyeHeight,
+                PlayerCenterHeight       = playerCenterHeight,
+                HearingRange             = hearingRange,
+                WalkNoiseLevel           = 0.3f,
+                RunNoiseLevel            = 1.0f,
+                MinNoiseThreshold        = minNoiseThreshold,
+                UseOcclusionForSound     = useOcclusionForSound,
+                SoundOcclusionMultiplier = soundOcclusionMult,
+                WalkSpeed                = walkSpeed,
+                RunSpeed                 = runSpeed,
+                IdleDuration             = idleDuration,
+                AttackCooldown           = attackCooldown,
+                WaypointReachedThreshold = waypointReachedThreshold,
+                AttackRotationSpeed      = attackRotationSpeed,
+                EnableWaypointIdleStop   = enableWaypointIdleStop,
+                WaypointIdleChance       = waypointIdleChance,
+                WaypointIdleDuration     = waypointIdleDuration,
+                InvestigateLookDuration  = investigateLookDuration,
+                InvestigateFixDuration   = investigateFixDuration
+            };
 
-            // Try to find the player for visualization
             GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
             if (playerObj != null)
             {
-                player = playerObj.transform;
+                _player       = playerObj.transform;
+                _audioEmitter = playerObj.GetComponent<PlayerAudioEmitter>();
             }
 
-            // Create a new FSM instance for this NPC (not using singleton)
-            fsm = new MinimalisticFSM();
+            if (autoGenerateWaypoints && (patrolWaypoints == null || patrolWaypoints.Length == 0))
+                GenerateWaypoints();
 
-            // Create configuration with all behavior parameters
-            NpcConfig config = new NpcConfig
-            {
-                DetectionRange = detectionRange,
-                AttackRange = attackRange,
-                FieldOfViewAngle = fieldOfViewAngle,
-                RequireLineOfSight = requireLineOfSight,
-                ObstacleLayerMask = obstacleLayerMask,
-                NpcEyeHeight = npcEyeHeight,
-                PlayerCenterHeight = playerCenterHeight,
-                HearingRange = hearingRange,
-                WalkNoiseLevel = 0.3f,
-                RunNoiseLevel = 1.0f,
-                MinNoiseThreshold = minNoiseThreshold,
-                UseOcclusionForSound = useOcclusionForSound,
-                SoundOcclusionMultiplier = soundOcclusionMultiplier,
-                WalkSpeed = walkSpeed,
-                RunSpeed = runSpeed,
-                IdleDuration = idleDuration,
-                AttackCooldown = attackCooldown,
-                WaypointReachedThreshold = waypointReachedThreshold,
-                AttackRotationSpeed = attackRotationSpeed,
-                EnableRandomIdleDuringPatrol = enableRandomIdleDuringPatrol,
-                RandomIdleMinInterval = randomIdleMinInterval,
-                RandomIdleMaxInterval = randomIdleMaxInterval,
-                RandomIdleDuration = randomIdleDuration,
-                EnableWaypointIdleStop = enableWaypointIdleStop,
-                WaypointIdleChance = waypointIdleChance,
-                WaypointIdleDuration = waypointIdleDuration,
-                EnableRandomDirectionChange = enableRandomDirectionChange,
-                DirectionChangeChance = directionChangeChance,
-                InvestigateLookDuration = investigateLookDuration,
-                InvestigateFixDuration = investigateFixDuration
-            };
+            _blackboard = new NpcBlackboard();
+            BuildBehaviourTree();
 
-            // Register all possible states this NPC can be in
-            // Pass configuration so states can use the configured values
-            fsm.AddState(new NpcIdleState(gameObject, config));
-
-            // Create patrol state and configure waypoints
-            patrolState = new NpcPatrolState(gameObject, config);
-            if (patrolWaypoints != null && patrolWaypoints.Length > 0)
-            {
-                patrolState.SetWaypoints(patrolWaypoints);
-            }
-            fsm.AddState(patrolState);
-
-            fsm.AddState(new NpcChaseState(gameObject, config));
-            fsm.AddState(new NpcAttackState(gameObject, config));
-
-            // Store reference for gizmo drawing
-            searchState = new NpcSearchState(gameObject, config);
-            fsm.AddState(searchState);
-
-            // Investigate state - store reference so we can set the target box before switching
-            investigateState = new NpcInvestigateState(gameObject, config);
-            fsm.AddState(investigateState);
-
-            // Set the initial state
-            fsm.ChangeState<NpcIdleState>();
+            if (_player != null) _lastPlayerPos = _player.position;
         }
 
-        /// <summary>
-        /// Automatically generates waypoints in a circle around the NPC's starting position.
-        /// </summary>
-        private void GenerateWaypoints()
+        void Update()
         {
-            GameObject waypointParent = new GameObject($"{gameObject.name}_Waypoints");
-            waypointParent.transform.position = transform.position;
-
-            patrolWaypoints = new Transform[autoWaypointCount];
-
-            float angleStep = 360f / autoWaypointCount;
-
-            for (int i = 0; i < autoWaypointCount; i++)
-            {
-                // Calculate position in a circle
-                float angle = i * angleStep * Mathf.Deg2Rad;
-                Vector3 waypointPosition = transform.position + new Vector3(
-                    Mathf.Cos(angle) * waypointRadius,
-                    0f,
-                    Mathf.Sin(angle) * waypointRadius
-                );
-
-                // Create waypoint GameObject
-                GameObject waypoint = new GameObject($"Waypoint_{i + 1}");
-                waypoint.transform.position = waypointPosition;
-                waypoint.transform.parent = waypointParent.transform;
-
-                patrolWaypoints[i] = waypoint.transform;
-            }
-
-            Debug.Log($"[{gameObject.name}] Auto-generated {autoWaypointCount} waypoints at radius {waypointRadius}m");
+            if (_isDead) return;
+            UpdatePerception();
+            _btRoot?.Tick();
         }
 
-        /// <summary>
-        /// Enable input actions when the component is enabled.
-        /// </summary>
+        private void UpdatePerception()
+        {
+            _blackboard.DistanceToPlayer = DistanceToPlayer;
+
+            bool canSee = CanSeePlayer();
+            _blackboard.PlayerVisible = canSee;
+
+            if (canSee && _player != null)
+            {
+                // Track player movement direction for directional search points
+                Vector3 vel = (_player.position - _lastPlayerPos) / Time.deltaTime;
+                if (vel.sqrMagnitude > 0.01f)
+                    _blackboard.LastKnownPlayerMoveDir = vel.normalized;
+
+                _blackboard.LastKnownPlayerPosition = _player.position;
+                _blackboard.HasLastKnownPosition    = true;
+            }
+
+            Vector3 heardAt;
+            bool canHear = CanHearPlayer(out heardAt);
+            _blackboard.PlayerHeard = canHear;
+
+            if (canHear && !canSee)
+            {
+                _blackboard.LastKnownPlayerPosition = heardAt;
+                _blackboard.HasLastKnownPosition    = true;
+            }
+
+            if (_player != null) _lastPlayerPos = _player.position;
+
+            // Perception visualisation — visible in Game view when Gizmos are enabled.
+            // Green  = player seen (in FOV + LOS clear)
+            // Yellow = player heard but not seen
+            // Red    = player in range but blocked/outside FOV
+            if (_player != null)
+            {
+                Vector3 eye    = transform.position + Vector3.up * npcEyeHeight;
+                Vector3 target = _player.position   + Vector3.up * playerCenterHeight;
+                Color   rayCol = canSee ? Color.green : (canHear ? Color.yellow : Color.red);
+                Debug.DrawLine(eye, target, rayCol);
+            }
+        }
+
+        private void BuildBehaviourTree()
+        {
+            var ctx = new NpcBtContext(gameObject, Config, _blackboard);
+
+            _investigateAction = new BtActionInvestigate(ctx);
+
+            // ── Threat branch (highest priority) ─────────────────────────────────
+            // Inner Selector: attack if in range, else chase
+            var attackSequence = new BtSequence(new BtNode[]
+            {
+                new BtCheckInAttackRange(_blackboard, Config.AttackRange),
+                new BtActionAttack(ctx)
+            });
+            var threatResponse = new BtSelector(new BtNode[]
+            {
+                attackSequence,
+                new BtActionChase(ctx)
+            });
+            var threatBranch = new BtSequence(new BtNode[]
+            {
+                new BtCheckPlayerVisible(_blackboard),
+                threatResponse
+            });
+
+            // ── Power-box investigation branch ────────────────────────────────────
+            var powerBoxBranch = new BtSequence(new BtNode[]
+            {
+                new BtCheckPowerBoxActive(_blackboard),
+                _investigateAction
+            });
+
+            // ── Search branch with cooldown decorator ─────────────────────────────
+            // CooldownDecorator blocks re-entry for 5 s after a failed search.
+            var searchSequence = new BtSequence(new BtNode[]
+            {
+                new BtCheckHasLastKnownPosition(_blackboard),
+                new BtActionSearch(ctx)
+            });
+            var searchBranch = new BtCooldown(searchSequence, 5f);
+
+            // ── Patrol fallback (always Running) ──────────────────────────────────
+            var patrolBranch = new BtActionPatrol(ctx, patrolWaypoints);
+
+            // ── Root Selector — re-evaluates from top every tick ──────────────────
+            // This re-evaluation IS the interrupt mechanism: when playerVisible
+            // becomes true mid-patrol, the Threat branch wins on the very next tick.
+            _btRoot = new BtSelector(new BtNode[]
+            {
+                threatBranch,
+                powerBoxBranch,
+                searchBranch,
+                patrolBranch
+            });
+        }
+
         void OnEnable()
         {
-            // Setup default key bindings if not configured in Inspector
-            if (idleStateInput == null || idleStateInput.bindings.Count == 0)
-            {
-                idleStateInput = new InputAction("IdleState", binding: "<Keyboard>/1");
-            }
-            if (patrolStateInput == null || patrolStateInput.bindings.Count == 0)
-            {
-                patrolStateInput = new InputAction("PatrolState", binding: "<Keyboard>/2");
-            }
-            if (chaseStateInput == null || chaseStateInput.bindings.Count == 0)
-            {
-                chaseStateInput = new InputAction("ChaseState", binding: "<Keyboard>/3");
-            }
-            if (attackStateInput == null || attackStateInput.bindings.Count == 0)
-            {
-                attackStateInput = new InputAction("AttackState", binding: "<Keyboard>/4");
-            }
-
-            // Subscribe to power box events so NPC automatically investigates
             PowerBoxInteractable.OnPowerBoxActivated += OnPowerBoxActivated;
             PowerBoxInteractable.OnPowerBoxFixed      += OnPowerBoxFixed;
-
-            // Subscribe to input events
-            idleStateInput.performed += OnIdleStateInput;
-            patrolStateInput.performed += OnPatrolStateInput;
-            chaseStateInput.performed += OnChaseStateInput;
-            attackStateInput.performed += OnAttackStateInput;
-
-            // Enable all input actions
-            idleStateInput.Enable();
-            patrolStateInput.Enable();
-            chaseStateInput.Enable();
-            attackStateInput.Enable();
         }
 
-        /// <summary>
-        /// Disable input actions when the component is disabled.
-        /// Includes null checks to prevent errors during scene cleanup.
-        /// </summary>
         void OnDisable()
         {
             PowerBoxInteractable.OnPowerBoxActivated -= OnPowerBoxActivated;
             PowerBoxInteractable.OnPowerBoxFixed      -= OnPowerBoxFixed;
-
-            // Safely unsubscribe from input events with null checks
-            if (idleStateInput != null)
-            {
-                idleStateInput.performed -= OnIdleStateInput;
-                idleStateInput.Disable();
-            }
-
-            if (patrolStateInput != null)
-            {
-                patrolStateInput.performed -= OnPatrolStateInput;
-                patrolStateInput.Disable();
-            }
-
-            if (chaseStateInput != null)
-            {
-                chaseStateInput.performed -= OnChaseStateInput;
-                chaseStateInput.Disable();
-            }
-
-            if (attackStateInput != null)
-            {
-                attackStateInput.performed -= OnAttackStateInput;
-                attackStateInput.Disable();
-            }
         }
 
-        /// <summary>
-        /// Reapply the investigate state's manual rotation after Unity's Animator
-        /// root-motion step. Root motion is processed between Update and LateUpdate,
-        /// so any rotation we set in Update gets silently overwritten by the Animator
-        /// before the frame is rendered. Running here guarantees our rotation wins.
-        /// </summary>
         void LateUpdate()
         {
-            if (fsm != null && fsm.IsInState<NpcInvestigateState>())
-                investigateState?.ReapplyRotation();
+            // Only reapply investigate rotation while that branch is active
+            if (_blackboard?.ActiveNodeName == "Investigate")
+                _investigateAction?.ReapplyRotation();
+        }
+
+        // ── Public perception methods ──────────────────────────────────────────────
+
+        /// <summary>Full vision check: distance, FOV cone, and LOS raycast.</summary>
+        public bool CanSeePlayer()
+        {
+            if (_player == null) return false;
+            if (DistanceToPlayer > detectionRange) return false;
+            if (!requireLineOfSight) return true;
+
+            Vector3 dir   = (_player.position - transform.position).normalized;
+            float   angle = Vector3.Angle(transform.forward, dir);
+            if (angle > fieldOfViewAngle / 2f) return false;
+
+            Vector3 eye      = transform.position + Vector3.up * npcEyeHeight;
+            Vector3 target   = _player.position   + Vector3.up * playerCenterHeight;
+            Vector3 toTarget = target - eye;
+
+            return !Physics.Raycast(eye, toTarget.normalized, toTarget.magnitude, obstacleLayerMask);
         }
 
         /// <summary>
-        /// Update the FSM. States now handle their own transitions autonomously.
+        /// Hearing check with distance attenuation and optional occlusion.
+        /// heardAt is an approximate NavMesh-snapped position, not the exact player location.
         /// </summary>
-        void Update()
+        public bool CanHearPlayer(out Vector3 heardAt)
         {
-            fsm?.Update();
+            heardAt = Vector3.zero;
+            if (_player == null || _audioEmitter == null) return false;
 
-            // If a power box is still broken and the NPC has settled back into a calm
-            // state (patrol or idle), re-trigger the investigate state so the NPC
-            // returns to fix it even after being interrupted by the player.
-            if (pendingPowerBox != null && pendingPowerBox.IsActivated && fsm != null)
+            float dist = DistanceToPlayer;
+            if (dist > hearingRange) return false;
+
+            float noise = _audioEmitter.CurrentNoiseLevel;
+            if (noise < minNoiseThreshold) return false;
+
+            float effective = noise * (1f - dist / hearingRange);
+
+            if (useOcclusionForSound)
             {
-                if (fsm.IsInState<NpcPatrolState>() || fsm.IsInState<NpcIdleState>())
-                {
-                    Debug.Log($"[{name}] Power box still active - resuming investigation!");
-                    investigateState.SetTargetBox(pendingPowerBox);
-                    fsm.ChangeState<NpcInvestigateState>();
-                }
+                Vector3 eye       = transform.position + Vector3.up * npcEyeHeight;
+                Vector3 playerPos = _player.position   + Vector3.up * playerCenterHeight;
+                Vector3 dir       = playerPos - eye;
+                if (Physics.Raycast(eye, dir.normalized, dir.magnitude, obstacleLayerMask))
+                    effective *= soundOcclusionMult;
             }
+
+            if (effective < minNoiseThreshold) return false;
+
+            Vector3 toPlayer   = _player.position - transform.position;
+            float   approxDist = Mathf.Clamp(dist * Random.Range(0.8f, 1.1f), 1f, hearingRange);
+            float   spreadDeg  = Mathf.Lerp(5f, 25f, dist / hearingRange);
+            Vector3 approxDir  = Quaternion.Euler(0f, Random.Range(-spreadDeg, spreadDeg), 0f) * toPlayer.normalized;
+            Vector3 approxPos  = transform.position + approxDir * approxDist;
+
+            NavMeshHit navHit;
+            heardAt = NavMesh.SamplePosition(approxPos, out navHit, 3f, NavMesh.AllAreas)
+                ? navHit.position
+                : _player.position;
+
+            return true;
         }
 
-        // ===== INPUT SYSTEM CALLBACKS =====
-        // These methods are called when the corresponding input actions are triggered
-        // Useful for manual testing and debugging state behavior
+        // ── Takedown ───────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Called when Idle state input is triggered (default: Keyboard 1).
+        /// Called by PlayerTakedownController. Sets _isDead so the BT stops ticking.
         /// </summary>
-        private void OnIdleStateInput(InputAction.CallbackContext context)
+        public void StartTakedown(float duration)
         {
-            fsm?.ChangeState<NpcIdleState>();
+            _isDead = true;
+            Debug.Log($"[{name}] <color=magenta>Takedown triggered.</color>");
+
+            NavMeshAgent nav = GetComponent<NavMeshAgent>();
+            if (nav != null && nav.isActiveAndEnabled && nav.isOnNavMesh)
+            {
+                nav.isStopped = true;
+                nav.velocity  = Vector3.zero;
+            }
+
+            Animator anim = GetComponentInChildren<Animator>();
+            if (anim != null)
+            {
+                anim.SetBool("IsFixing", false);
+                anim.SetFloat("Speed", 0f);
+                anim.ResetTrigger("Attack");
+                anim.SetTrigger("Death");
+            }
+
+            if (fallClip != null && deathAudioSource != null)
+                StartCoroutine(PlayFallAudio());
+
+            StartCoroutine(DeactivateAfterDelay(duration));
         }
 
-        /// <summary>
-        /// Called when Patrol state input is triggered (default: Keyboard 2).
-        /// </summary>
-        private void OnPatrolStateInput(InputAction.CallbackContext context)
+        private IEnumerator DeactivateAfterDelay(float delay)
         {
-            fsm?.ChangeState<NpcPatrolState>();
+            yield return new WaitForSeconds(delay);
+            gameObject.SetActive(false);
         }
 
-        /// <summary>
-        /// Called when Chase state input is triggered (default: Keyboard 3).
-        /// </summary>
-        private void OnChaseStateInput(InputAction.CallbackContext context)
+        private IEnumerator PlayFallAudio()
         {
-            fsm?.ChangeState<NpcChaseState>();
+            yield return new WaitForSeconds(fallSoundDelay);
+            deathAudioSource.PlayOneShot(fallClip);
         }
 
-        /// <summary>
-        /// Called when Attack state input is triggered (default: Keyboard 4).
-        /// </summary>
-        private void OnAttackStateInput(InputAction.CallbackContext context)
-        {
-            fsm?.ChangeState<NpcAttackState>();
-        }
+        // ── Power Box Events ───────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Called when any power box is activated. Stores the box as pending so the
-        /// NPC can return to it after being interrupted, then switches to investigate.
-        /// </summary>
         private void OnPowerBoxActivated(PowerBoxInteractable box)
         {
-            if (investigateState == null) return;
-
-            pendingPowerBox = box;
-            investigateState.SetTargetBox(box);
-            fsm?.ChangeState<NpcInvestigateState>();
-            Debug.Log($"[{name}] Heading to investigate power box disturbance!");
+            Debug.Log($"[{name}] Power box activated — queued for investigation.");
+            TargetPowerBox              = box;
+            _blackboard.PowerBoxActive  = true;
+            _blackboard.TargetPowerBox  = box;
         }
 
-        /// <summary>
-        /// Called when a power box is fully repaired. Clears the pending reference
-        /// so the NPC doesn't keep trying to return to a box that's already fixed.
-        /// </summary>
         private void OnPowerBoxFixed(PowerBoxInteractable box)
         {
-            if (pendingPowerBox == box)
+            if (TargetPowerBox == box)
             {
-                pendingPowerBox = null;
-                Debug.Log($"[{name}] Power box fixed - no longer pending investigation.");
+                TargetPowerBox              = null;
+                _blackboard.PowerBoxActive  = false;
+                _blackboard.TargetPowerBox  = null;
             }
         }
 
-        /// <summary>
-        /// Clean up the FSM when this GameObject is destroyed.
-        /// </summary>
-        void OnDestroy()
+        // ── Waypoint Generation ────────────────────────────────────────────────────
+
+        private void GenerateWaypoints()
         {
-            fsm?.Clear();
+            GameObject parent = new GameObject($"{gameObject.name}_Waypoints");
+            parent.transform.position = transform.position;
+            patrolWaypoints = new Transform[autoWaypointCount];
+            float angleStep = 360f / autoWaypointCount;
+
+            for (int i = 0; i < autoWaypointCount; i++)
+            {
+                float   angle = i * angleStep * Mathf.Deg2Rad;
+                Vector3 pos   = transform.position + new Vector3(
+                    Mathf.Cos(angle) * waypointRadius, 0f, Mathf.Sin(angle) * waypointRadius);
+
+                GameObject wp = new GameObject($"Waypoint_{i + 1}");
+                wp.transform.position = pos;
+                wp.transform.parent   = parent.transform;
+                patrolWaypoints[i]    = wp.transform;
+            }
         }
 
-        /// <summary>
-        /// Draw visual debugging gizmos in the Scene view.
-        /// Yellow sphere = detection range
-        /// Red sphere = attack range
-        /// Orange sphere = hearing range
-        /// Green cone = field of view
-        /// Blue line = line of sight to player
-        /// Green spheres = waypoints
-        /// Cyan lines = patrol path
-        /// </summary>
+        // ── Debug Gizmos ───────────────────────────────────────────────────────────
+
         void OnDrawGizmosSelected()
         {
-            // Draw detection range (yellow)
             Gizmos.color = Color.yellow;
             Gizmos.DrawWireSphere(transform.position, detectionRange);
 
-            // Draw attack range (red)
             Gizmos.color = Color.red;
             Gizmos.DrawWireSphere(transform.position, attackRange);
 
-            // Draw hearing range (orange)
-            Gizmos.color = new Color(1f, 0.5f, 0f, 0.5f); // Orange
+            Gizmos.color = new Color(1f, 0.5f, 0f, 0.5f);
             Gizmos.DrawWireSphere(transform.position, hearingRange);
 
-            // Draw field of view cone
-            if (showFieldOfView)
-            {
-                DrawFieldOfViewGizmo();
-            }
+            if (showFieldOfView)                   DrawFOVGizmo();
+            if (showDetectionRaycast && _player != null) DrawLOSGizmo();
 
-            // Draw line of sight to player
-            if (showDetectionRaycast && player != null)
-            {
-                DrawLineOfSightGizmo();
-            }
-
-            // Draw waypoints and patrol path
             if (patrolWaypoints != null && patrolWaypoints.Length > 0)
             {
                 Gizmos.color = Color.green;
+                foreach (Transform wp in patrolWaypoints)
+                    if (wp != null) Gizmos.DrawWireSphere(wp.position, 0.5f);
 
-                // Draw each waypoint
-                foreach (Transform waypoint in patrolWaypoints)
-                {
-                    if (waypoint != null)
-                    {
-                        Gizmos.DrawWireSphere(waypoint.position, 0.5f);
-                    }
-                }
-
-                // Draw lines between waypoints to show patrol path
                 Gizmos.color = Color.cyan;
                 for (int i = 0; i < patrolWaypoints.Length; i++)
                 {
-                    if (patrolWaypoints[i] != null)
-                    {
-                        Transform nextWaypoint = patrolWaypoints[(i + 1) % patrolWaypoints.Length];
-                        if (nextWaypoint != null)
-                        {
-                            Gizmos.DrawLine(patrolWaypoints[i].position, nextWaypoint.position);
-                        }
-                    }
-                }
-            }
-
-            // Draw search state points when NPC is searching
-            if (Application.isPlaying && searchState != null && searchState.IsSearching && fsm != null && fsm.CurrentState is NpcSearchState)
-            {
-                Vector3[] points = searchState.SearchPoints;
-                int currentIndex = searchState.CurrentSearchIndex;
-
-                if (points != null)
-                {
-                    // Draw search radius circle
-                    Gizmos.color = new Color(0f, 1f, 1f, 0.2f); // Semi-transparent cyan
-                    Gizmos.DrawWireSphere(searchState.LastKnownPosition, 8f);
-
-                    // Draw last known position marker (larger, magenta)
-                    Gizmos.color = Color.magenta;
-                    Gizmos.DrawWireSphere(searchState.LastKnownPosition, 0.6f);
-                    Gizmos.DrawLine(searchState.LastKnownPosition, searchState.LastKnownPosition + Vector3.up * 2f);
-
-                    for (int i = 0; i < points.Length; i++)
-                    {
-                        // Visited points = dark cyan, current = bright yellow, upcoming = orange
-                        if (i < currentIndex)
-                        {
-                            Gizmos.color = new Color(0f, 0.5f, 0.5f, 0.5f); // Dark cyan (visited)
-                        }
-                        else if (i == currentIndex)
-                        {
-                            Gizmos.color = Color.yellow; // Current target
-                        }
-                        else
-                        {
-                            Gizmos.color = new Color(1f, 0.5f, 0f); // Orange (upcoming)
-                        }
-
-                        // Draw point sphere
-                        Gizmos.DrawWireSphere(points[i], 0.4f);
-
-                        // Draw vertical line at each point for visibility
-                        Gizmos.DrawLine(points[i], points[i] + Vector3.up * 1.5f);
-
-                        // Draw lines between consecutive search points
-                        if (i < points.Length - 1)
-                        {
-                            Gizmos.color = new Color(0f, 1f, 1f, 0.4f); // Cyan line
-                            Gizmos.DrawLine(points[i], points[i + 1]);
-                        }
-                    }
+                    if (patrolWaypoints[i] == null) continue;
+                    Transform next = patrolWaypoints[(i + 1) % patrolWaypoints.Length];
+                    if (next != null) Gizmos.DrawLine(patrolWaypoints[i].position, next.position);
                 }
             }
         }
 
-        /// <summary>
-        /// Draws the field of view cone in the scene view.
-        /// </summary>
-        private void DrawFieldOfViewGizmo()
+        private void DrawFOVGizmo()
         {
-            float halfFOV = fieldOfViewAngle / 2f;
-            Vector3 leftBoundary = Quaternion.Euler(0, -halfFOV, 0) * transform.forward * detectionRange;
-            Vector3 rightBoundary = Quaternion.Euler(0, halfFOV, 0) * transform.forward * detectionRange;
+            float   half  = fieldOfViewAngle / 2f;
+            Vector3 left  = Quaternion.Euler(0, -half, 0) * transform.forward * detectionRange;
+            Vector3 right = Quaternion.Euler(0,  half, 0) * transform.forward * detectionRange;
 
-            Gizmos.color = new Color(0, 1, 0, 0.2f); // Semi-transparent green
+            Gizmos.color = new Color(0, 1, 0, 0.2f);
+            Gizmos.DrawLine(transform.position, transform.position + left);
+            Gizmos.DrawLine(transform.position, transform.position + right);
 
-            // Draw the boundary lines
-            Gizmos.DrawLine(transform.position, transform.position + leftBoundary);
-            Gizmos.DrawLine(transform.position, transform.position + rightBoundary);
-
-            // Draw arc for the field of view
-            Vector3 previousPoint = transform.position + leftBoundary;
-            int segments = 20;
-            for (int i = 1; i <= segments; i++)
+            Vector3 prev = transform.position + left;
+            for (int i = 1; i <= 20; i++)
             {
-                float angle = -halfFOV + (fieldOfViewAngle * i / segments);
-                Vector3 direction = Quaternion.Euler(0, angle, 0) * transform.forward * detectionRange;
-                Vector3 point = transform.position + direction;
-                Gizmos.DrawLine(previousPoint, point);
-                previousPoint = point;
+                float   a = -half + fieldOfViewAngle * i / 20f;
+                Vector3 p = transform.position + Quaternion.Euler(0, a, 0) * transform.forward * detectionRange;
+                Gizmos.DrawLine(prev, p);
+                prev = p;
             }
         }
 
-        /// <summary>
-        /// Draws the line of sight raycast to the player.
-        /// Green if visible, red if occluded.
-        /// </summary>
-        private void DrawLineOfSightGizmo()
+        private void DrawLOSGizmo()
         {
-            Vector3 npcEyePosition = transform.position + Vector3.up * npcEyeHeight;
-            Vector3 playerPosition = player.position + Vector3.up * playerCenterHeight;
-            Vector3 directionToPlayer = playerPosition - npcEyePosition;
-            float distanceToPlayer = directionToPlayer.magnitude;
-
-            // Check for occlusion
-            RaycastHit hit;
-            bool isOccluded = Physics.Raycast(npcEyePosition, directionToPlayer.normalized, out hit, distanceToPlayer, obstacleLayerMask);
-
-            // Draw line - green if clear, red if occluded
-            Gizmos.color = isOccluded ? Color.red : Color.green;
-            Gizmos.DrawLine(npcEyePosition, playerPosition);
-
-            // Draw small sphere at player position
-            Gizmos.DrawWireSphere(playerPosition, 0.2f);
+            Vector3 eye    = transform.position + Vector3.up * npcEyeHeight;
+            Vector3 target = _player.position   + Vector3.up * playerCenterHeight;
+            Vector3 dir    = target - eye;
+            bool occluded  = Physics.Raycast(eye, dir.normalized, dir.magnitude, obstacleLayerMask);
+            Gizmos.color   = occluded ? Color.red : Color.green;
+            Gizmos.DrawLine(eye, target);
+            Gizmos.DrawWireSphere(target, 0.2f);
         }
     }
 }

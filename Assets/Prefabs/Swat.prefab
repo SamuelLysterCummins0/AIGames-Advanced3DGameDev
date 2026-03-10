@@ -2115,9 +2115,10 @@ GameObject:
   - component: {fileID: 5475637132089016025}
   - component: {fileID: 7971947595789488062}
   - component: {fileID: 1660474008416207498}
+  - component: {fileID: 4837638539257458337}
   m_Layer: 0
   m_Name: Swat
-  m_TagString: Untagged
+  m_TagString: NPC
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -2181,7 +2182,7 @@ NavMeshAgent:
   m_Height: 1
   m_BaseOffset: 0
   m_WalkableMask: 4294967295
-  m_ObstacleAvoidanceType: 0
+  m_ObstacleAvoidanceType: 2
 --- !u!114 &7971947595789488062
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2195,22 +2196,22 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Semester2.MinimalisticFSMExample
   detectionRange: 11
-  attackRange: 6
+  attackRange: 6.5
   fieldOfViewAngle: 90
   requireLineOfSight: 1
   obstacleLayerMask:
     serializedVersion: 2
-    m_Bits: 256
-  npcEyeHeight: 1.6
-  playerCenterHeight: 2
-  hearingRange: 8.5
+    m_Bits: 257
+  npcEyeHeight: 1
+  playerCenterHeight: 1
+  hearingRange: 7
   minNoiseThreshold: 0.2
-  useOcclusionForSound: 1
-  soundOcclusionMultiplier: 0.5
+  useOcclusionForSound: 0
+  soundOcclusionMult: 0.5
   walkSpeed: 2
   runSpeed: 3
   waypointReachedThreshold: 0.5
-  idleDuration: 5
+  idleDuration: 3
   attackCooldown: 1.5
   attackRotationSpeed: 10
   patrolWaypoints:
@@ -2230,48 +2231,18 @@ MonoBehaviour:
   randomIdleMaxInterval: 20
   randomIdleDuration: 3
   enableWaypointIdleStop: 1
-  waypointIdleChance: 0.7
+  waypointIdleChance: 0.401
   waypointIdleDuration: 2
-  enableRandomDirectionChange: 1
+  enableRandomDirectionChange: 0
   directionChangeChance: 0.3
+  investigateLookDuration: 6
+  investigateFixDuration: 12
+  searchCooldown: 5
+  deathAudioSource: {fileID: 0}
+  fallClip: {fileID: 0}
+  fallSoundDelay: 1.8
   showFieldOfView: 1
   showDetectionRaycast: 1
-  idleStateInput:
-    m_Name: Idle State Input
-    m_Type: 0
-    m_ExpectedControlType: 
-    m_Id: 339417da-7d12-45ca-9c1c-9e9d6e151609
-    m_Processors: 
-    m_Interactions: 
-    m_SingletonActionBindings: []
-    m_Flags: 0
-  patrolStateInput:
-    m_Name: Patrol State Input
-    m_Type: 0
-    m_ExpectedControlType: 
-    m_Id: 38018079-2cbc-4eda-ab1e-c319c16c2e92
-    m_Processors: 
-    m_Interactions: 
-    m_SingletonActionBindings: []
-    m_Flags: 0
-  chaseStateInput:
-    m_Name: Chase State Input
-    m_Type: 0
-    m_ExpectedControlType: 
-    m_Id: 5e7462ef-d2a2-47fb-9da4-c304c365d473
-    m_Processors: 
-    m_Interactions: 
-    m_SingletonActionBindings: []
-    m_Flags: 0
-  attackStateInput:
-    m_Name: Attack State Input
-    m_Type: 0
-    m_ExpectedControlType: 
-    m_Id: 3f530323-e578-4eb8-b234-951e5e890748
-    m_Processors: 
-    m_Interactions: 
-    m_SingletonActionBindings: []
-    m_Flags: 0
 --- !u!114 &1660474008416207498
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2288,8 +2259,30 @@ MonoBehaviour:
   showOverlay: 1
   showNavPath: 1
   navPathColor: {r: 0, g: 1, b: 1, a: 1}
-  stateTextColor: {r: 1, g: 1, b: 1, a: 1}
   labelHeightOffset: 2.5
+--- !u!136 &4837638539257458337
+CapsuleCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7773094020331427587}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 2
+  m_Radius: 0.5
+  m_Height: 1.7940896
+  m_Direction: 1
+  m_Center: {x: 0, y: 0.38687623, z: 0}
 --- !u!1 &8025519984205827561
 GameObject:
   m_ObjectHideFlags: 0
