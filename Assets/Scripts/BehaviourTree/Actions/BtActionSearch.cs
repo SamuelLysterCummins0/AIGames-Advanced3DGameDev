@@ -62,17 +62,19 @@ namespace Semester2
             _wasHearingLastTick   = false;
             _lastSoundTrackUpdate = 0f;
 
-            if (_ctx.Blackboard.PlayerHeard)
+            // trackingActive is true when sound is ongoing OR when reinforcement alerts
+            // are still arriving from a chasing NPC. Both cases use live LKP navigation.
+            bool trackingActive = _ctx.Blackboard.PlayerHeard || _ctx.Blackboard.ReinforcementTracking;
+            if (trackingActive)
             {
-                // Player is actively making noise right now — track the live sound
-                // position instead of generating static search points that would
-                // already be stale if the player keeps moving.
+                // Navigate toward the live last-known position (updated each alert / each heard tick)
+                // instead of committing to static points that would be stale if the player moves.
                 _wasHearingLastTick = true;
                 NavigateToSound();
             }
             else
             {
-                // Sound has already stopped — fan out from the last heard position
+                // No active tracking — fan out from the last known position
                 GenerateSearchPoints(_ctx.Blackboard.LastKnownPlayerPosition);
                 MoveToCurrentPoint();
             }
@@ -92,19 +94,21 @@ namespace Semester2
                 return NodeState.Failure;
             }
 
-            // ── Sound-tracking mode ────────────────────────────────────────────────
-            // While the player is actively heard, navigate toward the live sound
-            // position each tick. This fixes the bug where the NPC only moved to
-            // the first footstep heard and ignored all subsequent ones.
-            if (_ctx.Blackboard.PlayerHeard)
+            // ── Live-tracking mode ─────────────────────────────────────────────────
+            // Active while the player is heard OR while reinforcement alerts keep arriving
+            // from a chasing NPC. Navigates toward the current LKP each tick so this NPC
+            // follows the chase area rather than fanning around a stale first position.
+            bool trackingActive = _ctx.Blackboard.PlayerHeard || _ctx.Blackboard.ReinforcementTracking;
+            if (trackingActive)
             {
                 _wasHearingLastTick = true;
                 NavigateToSound();
                 return NodeState.Running;
             }
 
-            // Sound just stopped — switch from live tracking to fan search.
-            // This fires exactly once on the frame hearing ends.
+            // Tracking just stopped (sound ended or reinforcement alerts expired) —
+            // switch to fan search from the final received LKP.
+            // This fires exactly once on the first frame tracking ends.
             if (_wasHearingLastTick)
             {
                 Debug.Log($"[{_ctx.NpcName}] Sound lost — switching to fan search.");

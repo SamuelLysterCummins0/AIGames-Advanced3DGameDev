@@ -30,6 +30,18 @@ namespace Semester2
         public bool UseOcclusionForSound { get; set; }
         public float SoundOcclusionMultiplier { get; set; }
 
+        // Per-NPC hearing sensitivity — scales effective noise before threshold check.
+        // 1.0 = full sensitivity (default). Lower values make the NPC harder to alert
+        // from a distance or through floors. Useful for NPCs on different levels.
+        public float HearingNoiseSensitivity { get; set; }
+
+        // Controls the shape of the hearing volume.
+        // Vertical distance is multiplied by this before the range check, creating a
+        // flattened (oblate spheroid) hearing area instead of a perfect sphere.
+        // Higher values = harder to hear through floors.
+        // Effective vertical hearing radius = HearingRange / VerticalHearingPenalty.
+        public float VerticalHearingPenalty { get; set; }
+
         // Movement speeds
         public float WalkSpeed { get; set; }
         public float RunSpeed { get; set; }
@@ -77,6 +89,8 @@ namespace Semester2
                 MinNoiseThreshold = 0.2f,
                 UseOcclusionForSound = true,
                 SoundOcclusionMultiplier = 0.5f,
+                HearingNoiseSensitivity = 1f,
+                VerticalHearingPenalty  = 3f,
                 WalkSpeed = 5f,
                 RunSpeed = 9f,
                 IdleDuration = 2f,

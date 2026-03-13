@@ -82,7 +82,7 @@ namespace Semester2
             if (!_stylesInitialized) InitStyles();
 
             float panelWidth  = 340f;
-            float panelHeight = 255f;
+            float panelHeight = 275f;
             float padding     = 10f;
             float lineHeight  = 22f;
 
@@ -128,6 +128,12 @@ namespace Semester2
             string pbStr = powerBoxActive ? "<color=#ff8800>ACTIVE</color>" : "<color=#888888>none</color>";
             GUI.Label(new Rect(x, y, panelWidth - 20f, lineHeight),
                 $"PowerBox: {pbStr}", _labelStyle);
+            y += lineHeight;
+
+            bool   reinforcing = bb?.ReinforcementTracking ?? false;
+            string reinStr     = reinforcing ? "<color=#ff6600>ACTIVE</color>" : "<color=#888888>---</color>";
+            GUI.Label(new Rect(x, y, panelWidth - 20f, lineHeight),
+                $"Reinforcing: {reinStr}", _labelStyle);
             y += lineHeight;
 
             // Nav destination

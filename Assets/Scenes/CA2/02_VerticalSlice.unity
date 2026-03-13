@@ -452,20 +452,20 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 7773094020331427587, guid: 420a6e76447271e408f06da1c2fe32f2, type: 3}
       propertyPath: m_IsActive
-      value: 0
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 7971947595789488062, guid: 420a6e76447271e408f06da1c2fe32f2, type: 3}
       propertyPath: 'patrolWaypoints.Array.data[0]'
       value: 
-      objectReference: {fileID: 6841315729579865161}
+      objectReference: {fileID: 608343526}
     - target: {fileID: 7971947595789488062, guid: 420a6e76447271e408f06da1c2fe32f2, type: 3}
       propertyPath: 'patrolWaypoints.Array.data[1]'
       value: 
-      objectReference: {fileID: 4994100631409802115}
+      objectReference: {fileID: 319773936}
     - target: {fileID: 7971947595789488062, guid: 420a6e76447271e408f06da1c2fe32f2, type: 3}
       propertyPath: 'patrolWaypoints.Array.data[2]'
       value: 
-      objectReference: {fileID: 2274943634881953331}
+      objectReference: {fileID: 1118442430}
     - target: {fileID: 7971947595789488062, guid: 420a6e76447271e408f06da1c2fe32f2, type: 3}
       propertyPath: 'patrolWaypoints.Array.data[3]'
       value: 
@@ -473,19 +473,19 @@ PrefabInstance:
     - target: {fileID: 7971947595789488062, guid: 420a6e76447271e408f06da1c2fe32f2, type: 3}
       propertyPath: 'patrolWaypoints.Array.data[4]'
       value: 
-      objectReference: {fileID: 319773936}
+      objectReference: {fileID: 2274943634881953331}
     - target: {fileID: 7971947595789488062, guid: 420a6e76447271e408f06da1c2fe32f2, type: 3}
       propertyPath: 'patrolWaypoints.Array.data[5]'
       value: 
-      objectReference: {fileID: 608343526}
+      objectReference: {fileID: 900647030}
     - target: {fileID: 7971947595789488062, guid: 420a6e76447271e408f06da1c2fe32f2, type: 3}
       propertyPath: 'patrolWaypoints.Array.data[6]'
       value: 
-      objectReference: {fileID: 1118442430}
+      objectReference: {fileID: 4994100631409802115}
     - target: {fileID: 7971947595789488062, guid: 420a6e76447271e408f06da1c2fe32f2, type: 3}
       propertyPath: 'patrolWaypoints.Array.data[7]'
       value: 
-      objectReference: {fileID: 900647030}
+      objectReference: {fileID: 6841315729579865161}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -8595,7 +8595,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 7773094020331427587, guid: 420a6e76447271e408f06da1c2fe32f2, type: 3}
       propertyPath: m_IsActive
-      value: 0
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 7971947595789488062, guid: 420a6e76447271e408f06da1c2fe32f2, type: 3}
       propertyPath: autoGenerateWaypoints

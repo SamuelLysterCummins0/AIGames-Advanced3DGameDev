@@ -45,6 +45,14 @@ namespace Semester2
         [SerializeField] private float minNoiseThreshold    = 0.2f;
         [SerializeField] private bool  useOcclusionForSound = true;
         [SerializeField] private float soundOcclusionMult   = 0.5f;
+        [Tooltip("Scales effective noise before the threshold check. 1 = full sensitivity. " +
+                 "Lower this on NPCs that are on a different floor so they don't react to sounds from below.")]
+        [Range(0f, 1f)]
+        [SerializeField] private float hearingNoiseSensitivity = 1f;
+        [Tooltip("Scales vertical distance in the hearing check, flattening the detection volume into an oblate spheroid. " +
+                 "Higher = harder to hear through floors. Effective vertical range = Hearing Range / this value. " +
+                 "Default 3 gives ~3.3 m vertical reach when Hearing Range is 10.")]
+        [SerializeField] private float verticalHearingPenalty = 3f;
 
         [Header("NPC Movement Settings")]
         [SerializeField] private float walkSpeed                = 3.5f;
@@ -61,6 +69,9 @@ namespace Semester2
         [SerializeField] private bool        autoGenerateWaypoints = false;
         [SerializeField] private float       waypointRadius        = 10f;
         [SerializeField] private int         autoWaypointCount     = 4;
+        [Tooltip("Seconds to wait before the Behaviour Tree activates. " +
+                 "Set a non-zero value on one of two mirrored-waypoint NPCs to prevent patrol sync.")]
+        [SerializeField] private float patrolStartDelay = 0f;
 
         [Header("Waypoint Idle Settings")]
         [SerializeField] private bool  enableWaypointIdleStop = true;
@@ -71,6 +82,14 @@ namespace Semester2
         [Header("Investigate State Settings")]
         [SerializeField] private float investigateLookDuration = 7f;
         [SerializeField] private float investigateFixDuration  = 12f;
+
+        [Header("NPC Reinforcement Settings")]
+        [Tooltip("Ellipsoid distance (same vertical flattening as hearing) within which this NPC receives " +
+                 "another NPC's chase alert and heads to the area as reinforcement.")]
+        [SerializeField] private float reinforceRange = 15f;
+        [Tooltip("While chasing the player, how often (seconds) this NPC re-broadcasts its alert " +
+                 "so nearby NPCs keep getting updated last-known positions as the player moves.")]
+        [SerializeField] private float reinforceAlertInterval = 2f;
 
         [Header("Death")]
         [SerializeField] private string      npcDeathTrigger   = "Death"; // must match Animator parameter
@@ -83,6 +102,14 @@ namespace Semester2
         [SerializeField] private bool showDetectionRaycast = true;
 
         // ── Public API ─────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Fired when this NPC visually spots the player.
+        /// Other NpcControllers subscribe to this and check if they are close enough
+        /// to respond as reinforcements. Uses the same ellipsoid distance shape as hearing
+        /// so upper-floor NPCs are excluded automatically.
+        /// </summary>
+        public static event System.Action<NpcController, Vector3> OnNpcAlerting;
 
         /// <summary>Config built from inspector fields. Action scripts read speeds, ranges, etc.</summary>
         public NpcConfig Config { get; private set; }
@@ -103,9 +130,27 @@ namespace Semester2
 
         /// <summary>
         /// The power box being investigated.
-        /// Set by OnPowerBoxActivated, cleared by BtActionInvestigate on repair.
+        /// Set by AssignPowerBoxRepair, cleared by BtActionInvestigate on repair.
         /// </summary>
         public PowerBoxInteractable TargetPowerBox { get; set; }
+
+        /// <summary>True after StartTakedown() is called. PowerBoxInteractable uses this to detect handoff.</summary>
+        public bool IsDead => _isDead;
+
+        /// <summary>
+        /// True when this NPC can be assigned to investigate a power box.
+        /// Returns false if dead, BT not yet active, or currently chasing/attacking the player.
+        /// NPCs in Search or Patrol are eligible — they will break off their current activity.
+        /// </summary>
+        public bool IsEligibleForPowerBoxRepair
+        {
+            get
+            {
+                if (_isDead || !_btActive) return false;
+                string node = _blackboard?.ActiveNodeName ?? "None";
+                return node != "Chase" && node != "Attack";
+            }
+        }
 
         // ── Private fields ─────────────────────────────────────────────────────────
 
@@ -113,7 +158,10 @@ namespace Semester2
         private BtNode              _btRoot;
         private BtCooldown          _postChaseSearchCooldown; // kept so we can reset it on new audio cues
         private BtActionInvestigate _investigateAction; // kept so LateUpdate can call ReapplyRotation
-        private bool                _isDead = false;
+        private bool                _isDead   = false;
+        private bool                _btActive = false; // false until patrolStartDelay expires
+        private float               _lastAlertBroadcastTime  = -999f;
+        private float               _reinforcementEndTime    = -1f;   // expires when alerts stop arriving
         private Transform           _player;
         private PlayerAudioEmitter  _audioEmitter;
         private Vector3             _lastPlayerPos;
@@ -137,6 +185,8 @@ namespace Semester2
                 MinNoiseThreshold        = minNoiseThreshold,
                 UseOcclusionForSound     = useOcclusionForSound,
                 SoundOcclusionMultiplier = soundOcclusionMult,
+                HearingNoiseSensitivity  = hearingNoiseSensitivity,
+                VerticalHearingPenalty   = verticalHearingPenalty,
                 WalkSpeed                = walkSpeed,
                 RunSpeed                 = runSpeed,
                 IdleDuration             = idleDuration,
@@ -164,11 +214,17 @@ namespace Semester2
             BuildBehaviourTree();
 
             if (_player != null) _lastPlayerPos = _player.position;
+
+            // Delay BT activation so two mirrored-waypoint NPCs never start in sync.
+            if (patrolStartDelay > 0f)
+                StartCoroutine(ActivateBtAfterDelay(patrolStartDelay));
+            else
+                _btActive = true;
         }
 
         void Update()
         {
-            if (_isDead) return;
+            if (_isDead || !_btActive) return;
             UpdatePerception();
             _btRoot?.Tick();
         }
@@ -177,7 +233,8 @@ namespace Semester2
         {
             _blackboard.DistanceToPlayer = DistanceToPlayer;
 
-            bool canSee = CanSeePlayer();
+            bool wasVisible = _blackboard.PlayerVisible; // capture before overwriting
+            bool canSee     = CanSeePlayer();
             _blackboard.PlayerVisible = canSee;
 
             if (canSee && _player != null)
@@ -190,6 +247,14 @@ namespace Semester2
                 _blackboard.LastKnownPlayerPosition = _player.position;
                 _blackboard.HasLastKnownPosition    = true;
                 _blackboard.LkpFromChase            = true; // visual contact — defer Investigate
+
+                // Alert nearby NPCs: on first spot and periodically while chasing,
+                // so reinforcing NPCs keep getting an updated last-known position.
+                if (!wasVisible || Time.time - _lastAlertBroadcastTime >= reinforceAlertInterval)
+                {
+                    OnNpcAlerting?.Invoke(this, _player.position);
+                    _lastAlertBroadcastTime = Time.time;
+                }
             }
 
             Vector3 heardAt;
@@ -203,6 +268,11 @@ namespace Semester2
                 _postChaseSearchCooldown?.ResetCooldown();
 
             _blackboard.PlayerHeard = canHear;
+
+            // Active while alerts keep arriving AND this NPC hasn't spotted the player itself.
+            // Once this NPC gains sight, the Threat branch takes over so the flag is irrelevant.
+            _blackboard.ReinforcementTracking = Time.time < _reinforcementEndTime
+                                                && !_blackboard.PlayerVisible;
 
             if (canHear && !canSee)
             {
@@ -297,14 +367,17 @@ namespace Semester2
 
         void OnEnable()
         {
-            PowerBoxInteractable.OnPowerBoxActivated += OnPowerBoxActivated;
-            PowerBoxInteractable.OnPowerBoxFixed      += OnPowerBoxFixed;
+            // Note: OnPowerBoxActivated is NOT subscribed here — NPCs no longer self-assign
+            // when the box fires. PowerBoxInteractable selects a single responder and calls
+            // AssignPowerBoxRepair() directly on it.
+            PowerBoxInteractable.OnPowerBoxFixed += OnPowerBoxFixed;
+            OnNpcAlerting                        += OnReceiveNpcAlert;
         }
 
         void OnDisable()
         {
-            PowerBoxInteractable.OnPowerBoxActivated -= OnPowerBoxActivated;
-            PowerBoxInteractable.OnPowerBoxFixed      -= OnPowerBoxFixed;
+            PowerBoxInteractable.OnPowerBoxFixed -= OnPowerBoxFixed;
+            OnNpcAlerting                        -= OnReceiveNpcAlert;
         }
 
         void LateUpdate()
@@ -343,13 +416,23 @@ namespace Semester2
             heardAt = Vector3.zero;
             if (_player == null || _audioEmitter == null) return false;
 
-            float dist = DistanceToPlayer;
-            if (dist > hearingRange) return false;
+            // Build a flattened (oblate spheroid) hearing volume: full range horizontally,
+            // reduced range vertically. This stops NPCs on upper floors hearing the player
+            // through a floor/ceiling gap even when straight-line distance is short.
+            // Effective vertical radius = hearingRange / verticalHearingPenalty.
+            Vector3 toPlayer  = _player.position - transform.position;
+            float   hDist     = Mathf.Sqrt(toPlayer.x * toPlayer.x + toPlayer.z * toPlayer.z);
+            float   vDist     = Mathf.Abs(toPlayer.y);
+            float   vScaled   = vDist * Config.VerticalHearingPenalty;
+            float   adjustedDist = Mathf.Sqrt(hDist * hDist + vScaled * vScaled);
+
+            float dist = DistanceToPlayer; // true 3D distance — kept for approxDist NavMesh snap only
+            if (adjustedDist > hearingRange) return false;
 
             float noise = _audioEmitter.CurrentNoiseLevel;
             if (noise < minNoiseThreshold) return false;
 
-            float effective = noise * (1f - dist / hearingRange);
+            float effective = noise * Config.HearingNoiseSensitivity * (1f - adjustedDist / hearingRange);
 
             if (useOcclusionForSound)
             {
@@ -362,9 +445,8 @@ namespace Semester2
 
             if (effective < minNoiseThreshold) return false;
 
-            Vector3 toPlayer   = _player.position - transform.position;
-            float   approxDist = Mathf.Clamp(dist * Random.Range(0.8f, 1.1f), 1f, hearingRange);
-            float   spreadDeg  = Mathf.Lerp(5f, 25f, dist / hearingRange);
+            float approxDist = Mathf.Clamp(dist * Random.Range(0.8f, 1.1f), 1f, hearingRange);
+            float spreadDeg  = Mathf.Lerp(5f, 25f, adjustedDist / hearingRange);
             Vector3 approxDir  = Quaternion.Euler(0f, Random.Range(-spreadDeg, spreadDeg), 0f) * toPlayer.normalized;
             Vector3 approxPos  = transform.position + approxDir * approxDist;
 
@@ -409,6 +491,13 @@ namespace Semester2
             StartCoroutine(DeactivateAfterDelay(duration));
         }
 
+        private IEnumerator ActivateBtAfterDelay(float delay)
+        {
+            yield return new WaitForSeconds(delay);
+            _btActive = true;
+            Debug.Log($"[{name}] <color=green>BT activated after {delay}s start delay.</color>");
+        }
+
         private IEnumerator DeactivateAfterDelay(float delay)
         {
             yield return new WaitForSeconds(delay);
@@ -421,14 +510,56 @@ namespace Semester2
             deathAudioSource.PlayOneShot(fallClip);
         }
 
+        // ── Reinforcement Alert ────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Received when another NPC visually spots the player.
+        /// If that NPC is within reinforceRange (ellipsoid, same shape as hearing),
+        /// this NPC updates its last-known position and heads to the area as reinforcement.
+        /// It doesn't magically see the player — its own perception handles Chase/Attack.
+        /// </summary>
+        private void OnReceiveNpcAlert(NpcController alerter, Vector3 alertPosition)
+        {
+            if (alerter == this || _isDead || !_btActive) return;
+
+            // Ellipsoid distance to the alerting NPC — mirrors the hearing volume shape
+            // so NPCs on different floors are excluded without any extra configuration.
+            Vector3 toAlerter = alerter.transform.position - transform.position;
+            float   hDist     = Mathf.Sqrt(toAlerter.x * toAlerter.x + toAlerter.z * toAlerter.z);
+            float   vDist     = Mathf.Abs(toAlerter.y);
+            float   vScaled   = vDist * Config.VerticalHearingPenalty;
+            float   alertDist = Mathf.Sqrt(hDist * hDist + vScaled * vScaled);
+
+            if (alertDist > reinforceRange) return;
+
+            // Give this NPC a last-known position so the Search branch fires.
+            // Do NOT set LkpFromChase — this NPC didn't visually chase the player,
+            // so it should still be allowed to investigate the PowerBox after searching.
+            _blackboard.LastKnownPlayerPosition = alertPosition;
+            _blackboard.HasLastKnownPosition    = true;
+
+            // Reset the post-chase search cooldown so the search fires immediately.
+            _postChaseSearchCooldown?.ResetCooldown();
+
+            // Keep ReinforcementTracking active for slightly longer than the broadcast interval
+            // so a slightly late alert doesn't cause a 1-frame gap that resets to fan-search.
+            _reinforcementEndTime = Time.time + reinforceAlertInterval + 0.5f;
+
+            Debug.Log($"[{name}] <color=orange>Reinforcement alert from {alerter.name} — moving to support.</color>");
+        }
+
         // ── Power Box Events ───────────────────────────────────────────────────────
 
-        private void OnPowerBoxActivated(PowerBoxInteractable box)
+        /// <summary>
+        /// Called by PowerBoxInteractable when this NPC has been selected as the sole responder.
+        /// Sets the blackboard so the PowerBox branch in the BT fires on the next tick.
+        /// </summary>
+        public void AssignPowerBoxRepair(PowerBoxInteractable box)
         {
-            Debug.Log($"[{name}] Power box activated — queued for investigation.");
-            TargetPowerBox              = box;
-            _blackboard.PowerBoxActive  = true;
-            _blackboard.TargetPowerBox  = box;
+            TargetPowerBox             = box;
+            _blackboard.PowerBoxActive = true;
+            _blackboard.TargetPowerBox = box;
+            Debug.Log($"[{name}] <color=orange>Assigned to fix power box.</color>");
         }
 
         private void OnPowerBoxFixed(PowerBoxInteractable box)
@@ -473,8 +604,13 @@ namespace Semester2
             Gizmos.color = Color.red;
             Gizmos.DrawWireSphere(transform.position, attackRange);
 
+            // Hearing volume is an oblate spheroid — draw horizontal disc (full range)
+            // and two side discs (effective vertical range = hearingRange / penalty).
+            float vertHearRange = (verticalHearingPenalty > 0f) ? hearingRange / verticalHearingPenalty : hearingRange;
             Gizmos.color = new Color(1f, 0.5f, 0f, 0.5f);
-            Gizmos.DrawWireSphere(transform.position, hearingRange);
+            DrawGizmoCircle(transform.position, hearingRange,    Vector3.up);      // horizontal disc
+            DrawGizmoCircle(transform.position, vertHearRange,   Vector3.right);   // side view XY
+            DrawGizmoCircle(transform.position, vertHearRange,   Vector3.forward); // side view ZY
 
             if (showFieldOfView)                   DrawFOVGizmo();
             if (showDetectionRaycast && _player != null) DrawLOSGizmo();
@@ -524,6 +660,27 @@ namespace Semester2
             Gizmos.color   = occluded ? Color.red : Color.green;
             Gizmos.DrawLine(eye, target);
             Gizmos.DrawWireSphere(target, 0.2f);
+        }
+
+        /// <summary>
+        /// Draws a wire circle in the plane defined by the given normal.
+        /// Used to visualise the oblate-spheroid hearing volume in the Scene view.
+        /// </summary>
+        private void DrawGizmoCircle(Vector3 centre, float radius, Vector3 normal)
+        {
+            // Build two orthogonal axes that lie on the circle plane
+            Vector3 tangent   = Vector3.Cross(normal, normal == Vector3.up ? Vector3.forward : Vector3.up).normalized;
+            Vector3 bitangent = Vector3.Cross(normal, tangent);
+
+            const int steps = 24;
+            Vector3 prev = centre + tangent * radius;
+            for (int i = 1; i <= steps; i++)
+            {
+                float   angle = i * Mathf.PI * 2f / steps;
+                Vector3 next  = centre + (tangent * Mathf.Cos(angle) + bitangent * Mathf.Sin(angle)) * radius;
+                Gizmos.DrawLine(prev, next);
+                prev = next;
+            }
         }
     }
 }

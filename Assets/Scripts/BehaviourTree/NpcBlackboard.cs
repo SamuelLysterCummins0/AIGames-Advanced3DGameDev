@@ -23,6 +23,11 @@ namespace Semester2
         // to block Investigate only after a real chase, not after a brief footstep.
         public bool LkpFromChase;
 
+        // True while reinforcement alerts are still arriving from a chasing NPC.
+        // BtActionSearch uses this to navigate toward the live LKP (same as PlayerHeard
+        // tracking mode) instead of committing to static fan-search points.
+        public bool ReinforcementTracking;
+
         // The direction the player was moving when last detected.
         // Search uses this to fan points forward instead of searching randomly.
         public Vector3 LastKnownPlayerMoveDir;
