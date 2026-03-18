@@ -43,12 +43,6 @@ namespace Semester2
     public class MinimalisticFSM
     {
         /// <summary>
-        /// Singleton instance for global FSM usage (e.g., game flow states).
-        /// For individual entities (NPCs, players), create separate instances using 'new MinimalisticFSM()'.
-        /// </summary>
-        public static MinimalisticFSM Instance { get; } = new MinimalisticFSM();
-
-        /// <summary>
         /// The currently active state. Can be null if no state is set.
         /// </summary>
         private IState currentState;

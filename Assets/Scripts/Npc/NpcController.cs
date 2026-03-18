@@ -42,6 +42,8 @@ namespace Semester2
 
         [Header("NPC Audio Detection Settings")]
         [SerializeField] private float hearingRange         = 10f;
+        [SerializeField] private float walkNoiseLevel       = 0.3f;
+        [SerializeField] private float runNoiseLevel        = 1.0f;
         [SerializeField] private float minNoiseThreshold    = 0.2f;
         [SerializeField] private bool  useOcclusionForSound = true;
         [SerializeField] private float soundOcclusionMult   = 0.5f;
@@ -63,6 +65,12 @@ namespace Semester2
         [SerializeField] private float idleDuration        = 2f;
         [SerializeField] private float attackCooldown      = 1.5f;
         [SerializeField] private float attackRotationSpeed = 10f;
+        [Tooltip("Fraction of Attack Range at which the NPC holds its position. 0.7 = 70% of Attack Range.")]
+        [SerializeField] private float shootingDistanceRatio = 0.7f;
+        [Tooltip("Seconds of sustained LOS loss before the NPC stops firing in the Attack state.")]
+        [SerializeField] private float losLostThreshold = 1f;
+        [Tooltip("Damage dealt to the player on each attack hit.")]
+        [SerializeField] private float attackDamage = 34f;
 
         [Header("Patrol Settings")]
         [SerializeField] private Transform[] patrolWaypoints;
@@ -82,6 +90,12 @@ namespace Semester2
         [Header("Investigate State Settings")]
         [SerializeField] private float investigateLookDuration = 7f;
         [SerializeField] private float investigateFixDuration  = 12f;
+
+        [Header("Search State Settings")]
+        [SerializeField] private float searchRadius        = 8f;
+        [SerializeField] private int   searchPointCount    = 4;
+        [SerializeField] private float maxSearchDuration   = 15f;
+        [SerializeField] private float searchPauseDuration = 1.5f;
 
         [Header("NPC Reinforcement Settings")]
         [Tooltip("Ellipsoid distance (same vertical flattening as hearing) within which this NPC receives " +
@@ -180,8 +194,8 @@ namespace Semester2
                 NpcEyeHeight             = npcEyeHeight,
                 PlayerCenterHeight       = playerCenterHeight,
                 HearingRange             = hearingRange,
-                WalkNoiseLevel           = 0.3f,
-                RunNoiseLevel            = 1.0f,
+                WalkNoiseLevel           = walkNoiseLevel,
+                RunNoiseLevel            = runNoiseLevel,
                 MinNoiseThreshold        = minNoiseThreshold,
                 UseOcclusionForSound     = useOcclusionForSound,
                 SoundOcclusionMultiplier = soundOcclusionMult,
@@ -197,7 +211,14 @@ namespace Semester2
                 WaypointIdleChance       = waypointIdleChance,
                 WaypointIdleDuration     = waypointIdleDuration,
                 InvestigateLookDuration  = investigateLookDuration,
-                InvestigateFixDuration   = investigateFixDuration
+                InvestigateFixDuration   = investigateFixDuration,
+                SearchRadius             = searchRadius,
+                SearchPointCount         = searchPointCount,
+                MaxSearchDuration        = maxSearchDuration,
+                SearchPauseDuration      = searchPauseDuration,
+                ShootingDistanceRatio    = shootingDistanceRatio,
+                LosLostThreshold         = losLostThreshold,
+                AttackDamage             = attackDamage
             };
 
             GameObject playerObj = GameObject.FindGameObjectWithTag("Player");

@@ -89,6 +89,9 @@ namespace Semester2
         private bool          _isAnimating  = false;
         private NpcController _nearbyTarget = null;
 
+        /// <summary>True while a takedown animation is in progress.</summary>
+        public bool IsAnimating => _isAnimating;
+
         void Start()
         {
             _fpsController = GetComponent<FirstPersonController>();
@@ -111,6 +114,11 @@ namespace Semester2
                 Debug.LogWarning("[PlayerTakedownController] PromptUI not assigned in Inspector.");
             if (cameraRoot == null)
                 Debug.LogWarning("[PlayerTakedownController] CameraRoot not assigned — camera won't move during takedown.");
+        }
+
+        void OnDisable()
+        {
+            if (promptUI != null) promptUI.SetActive(false);
         }
 
         void Update()

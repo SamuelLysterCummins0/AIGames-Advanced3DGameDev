@@ -16,14 +16,13 @@ namespace Semester2
         private float _lastAttackTime  = 0f;
         private float _shootingDistance;
 
-        // Track how long LOS has been lost — only exit after a sustained loss
+        // Track how long LOS has been lost — only stop firing after a sustained loss
         private float _losLostTimer = 0f;
-        private const float LOS_LOST_THRESHOLD = 1f;
 
         public BtActionAttack(NpcBtContext ctx)
         {
             _ctx              = ctx;
-            _shootingDistance = ctx.Config.AttackRange * 0.7f;
+            _shootingDistance = ctx.Config.AttackRange * ctx.Config.ShootingDistanceRatio;
             // Search the NPC hierarchy for a GunAudio component (e.g. on a weapon child GO).
             // GetComponentInChildren also checks the root, so it works whether it's on the
             // NPC itself or a child weapon object.
@@ -113,7 +112,7 @@ namespace Semester2
             Vector3 dir = (_ctx.Owner.transform.position - _ctx.Player.position).normalized;
             _ctx.Agent.isStopped = false;
             _ctx.Agent.SetDestination(_ctx.Owner.transform.position + dir);
-            if (_ctx.Anim != null) _ctx.Anim.SetFloat("Speed", _ctx.Agent.speed * 0.5f);
+            if (_ctx.Anim != null) _ctx.Anim.SetFloat("Speed", _ctx.Agent.velocity.magnitude);
         }
 
         private void MoveTowardPlayer()
@@ -121,7 +120,7 @@ namespace Semester2
             if (_ctx.Player == null || _ctx.Agent == null) return;
             _ctx.Agent.isStopped = false;
             _ctx.Agent.SetDestination(_ctx.Player.position);
-            if (_ctx.Anim != null) _ctx.Anim.SetFloat("Speed", _ctx.Agent.speed * 0.5f);
+            if (_ctx.Anim != null) _ctx.Anim.SetFloat("Speed", _ctx.Agent.velocity.magnitude);
         }
 
         private void StopMoving()
@@ -154,6 +153,13 @@ namespace Semester2
                 _ctx.Anim.SetTrigger("Attack");
             }
             _gunAudio?.PlayShot();
+
+            // Deal damage to the player if they have a health component
+            if (_ctx.Player != null)
+            {
+                PlayerHealth health = _ctx.Player.GetComponent<PlayerHealth>();
+                health?.TakeDamage(_ctx.Config.AttackDamage);
+            }
         }
     }
 }

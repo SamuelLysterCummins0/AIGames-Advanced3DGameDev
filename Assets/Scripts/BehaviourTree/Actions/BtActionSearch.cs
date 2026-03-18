@@ -16,11 +16,7 @@ namespace Semester2
     {
         private readonly NpcBtContext _ctx;
 
-        private const float SEARCH_RADIUS       = 8f;
-        private const int   SEARCH_POINT_COUNT  = 4;
-        private const float MAX_SEARCH_DURATION = 15f;
-        private const float PAUSE_DURATION      = 1.5f;
-        private const float LOOK_INTERVAL       = 0.8f;
+        private const float LOOK_INTERVAL = 0.8f;
 
         private Vector3[] _searchPoints;
         private int       _currentIndex  = 0;
@@ -86,7 +82,7 @@ namespace Semester2
             _searchTimer += Time.deltaTime;
 
             // Timeout — give up and return to patrol
-            if (_searchTimer >= MAX_SEARCH_DURATION)
+            if (_searchTimer >= _ctx.Config.MaxSearchDuration)
             {
                 Debug.Log($"[{_ctx.NpcName}] Search timed out.");
                 _ctx.Blackboard.HasLastKnownPosition = false;
@@ -125,6 +121,10 @@ namespace Semester2
             // ── Fan search ─────────────────────────────────────────────────────────
             if (_movingToPoint)
             {
+                // Keep animator in sync with actual agent speed each tick
+                if (_ctx.Anim != null)
+                    _ctx.Anim.SetFloat("Speed", _ctx.Agent.velocity.magnitude);
+
                 if (HasReachedDestination())
                 {
                     _movingToPoint = false;
@@ -144,7 +144,7 @@ namespace Semester2
                 _pauseTimer += Time.deltaTime;
                 LookAround();
 
-                if (_pauseTimer >= PAUSE_DURATION)
+                if (_pauseTimer >= _ctx.Config.SearchPauseDuration)
                 {
                     _currentIndex++;
                     if (_currentIndex >= _searchPoints.Length)
@@ -175,7 +175,7 @@ namespace Semester2
         // Falls back to a random spread if no movement direction is known.
         private void GenerateSearchPoints(Vector3 center)
         {
-            _searchPoints    = new Vector3[SEARCH_POINT_COUNT];
+            _searchPoints    = new Vector3[_ctx.Config.SearchPointCount];
             _searchPoints[0] = center;
 
             Vector3 moveDir = _ctx.Blackboard.LastKnownPlayerMoveDir;
@@ -190,13 +190,13 @@ namespace Semester2
                 // Offsets: straight ahead, left of travel, right of travel
                 float[] angleOffsets = { 0f, -50f, 50f };
 
-                for (int i = 1; i < SEARCH_POINT_COUNT; i++)
+                for (int i = 1; i < _ctx.Config.SearchPointCount; i++)
                 {
                     float jitter   = Random.Range(-20f, 20f);
                     float angleDeg = baseAngleDeg + angleOffsets[i - 1] + jitter;
                     float angleRad = angleDeg * Mathf.Deg2Rad;
 
-                    float dist = Mathf.Lerp(SEARCH_RADIUS * 0.6f, SEARCH_RADIUS, (float)i / (SEARCH_POINT_COUNT - 1));
+                    float dist = Mathf.Lerp(_ctx.Config.SearchRadius * 0.6f, _ctx.Config.SearchRadius, (float)i / (_ctx.Config.SearchPointCount - 1));
                     dist += Random.Range(-1f, 1f);
 
                     Vector3 dir = new Vector3(Mathf.Sin(angleRad), 0f, Mathf.Cos(angleRad));
@@ -211,13 +211,13 @@ namespace Semester2
             else
             {
                 // Fallback: random spread when no movement direction is available
-                float angleStep  = 360f / (SEARCH_POINT_COUNT - 1);
+                float angleStep  = 360f / (_ctx.Config.SearchPointCount - 1);
                 float startAngle = Random.Range(0f, 360f);
 
-                for (int i = 1; i < SEARCH_POINT_COUNT; i++)
+                for (int i = 1; i < _ctx.Config.SearchPointCount; i++)
                 {
                     float angle = (startAngle + angleStep * (i - 1)) * Mathf.Deg2Rad;
-                    float dist  = Mathf.Lerp(SEARCH_RADIUS * 0.5f, SEARCH_RADIUS, (float)i / (SEARCH_POINT_COUNT - 1));
+                    float dist  = Mathf.Lerp(_ctx.Config.SearchRadius * 0.5f, _ctx.Config.SearchRadius, (float)i / (_ctx.Config.SearchPointCount - 1));
                     dist += Random.Range(-1f, 1f);
 
                     Vector3 pos = center + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * dist;
@@ -240,7 +240,7 @@ namespace Semester2
 
             _ctx.Agent.isStopped = false;
             _ctx.Agent.speed     = _ctx.Config.RunSpeed;
-            if (_ctx.Anim != null) _ctx.Anim.SetFloat("Speed", _ctx.Config.RunSpeed);
+            if (_ctx.Anim != null) _ctx.Anim.SetFloat("Speed", _ctx.Agent.velocity.magnitude);
 
             // Rate-limit path recalculation
             if (Time.time - _lastSoundTrackUpdate < 0.2f) return;
@@ -255,7 +255,7 @@ namespace Semester2
             _ctx.Agent.isStopped = false;
             _ctx.Agent.speed     = _ctx.Config.RunSpeed;
             _ctx.Agent.SetDestination(_searchPoints[_currentIndex]);
-            if (_ctx.Anim != null) _ctx.Anim.SetFloat("Speed", _ctx.Config.RunSpeed);
+            if (_ctx.Anim != null) _ctx.Anim.SetFloat("Speed", _ctx.Agent.velocity.magnitude);
         }
 
         private bool HasReachedDestination()

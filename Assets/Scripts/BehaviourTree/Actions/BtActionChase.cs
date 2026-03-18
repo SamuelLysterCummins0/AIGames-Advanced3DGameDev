@@ -57,6 +57,10 @@ namespace Semester2
                 _lastDestinationUpdate = Time.time;
             }
 
+            // Keep animator in sync with actual agent speed each tick
+            if (_ctx.Anim != null)
+                _ctx.Anim.SetFloat("Speed", _ctx.Agent.velocity.magnitude);
+
             return NodeState.Running;
         }
 

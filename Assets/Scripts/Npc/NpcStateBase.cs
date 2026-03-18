@@ -69,6 +69,17 @@ namespace Semester2
         public float InvestigateLookDuration { get; set; }
         public float InvestigateFixDuration { get; set; }
 
+        // Search state settings
+        public float SearchRadius        { get; set; }
+        public int   SearchPointCount    { get; set; }
+        public float MaxSearchDuration   { get; set; }
+        public float SearchPauseDuration { get; set; }
+
+        // Attack state settings
+        public float ShootingDistanceRatio { get; set; }
+        public float LosLostThreshold      { get; set; }
+        public float AttackDamage          { get; set; }
+
         /// <summary>
         /// Creates default configuration values.
         /// </summary>
@@ -107,7 +118,14 @@ namespace Semester2
                 EnableRandomDirectionChange = false,
                 DirectionChangeChance = 0.3f,
                 InvestigateLookDuration = 7f,
-                InvestigateFixDuration = 12f   // Must exceed Fix animation clip length
+                InvestigateFixDuration  = 12f,  // Must exceed Fix animation clip length
+                SearchRadius            = 8f,
+                SearchPointCount        = 4,
+                MaxSearchDuration       = 15f,
+                SearchPauseDuration     = 1.5f,
+                ShootingDistanceRatio   = 0.7f,
+                LosLostThreshold        = 1f,
+                AttackDamage            = 34f
             };
         }
     }

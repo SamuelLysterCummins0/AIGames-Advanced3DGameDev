@@ -86,6 +86,10 @@ namespace Semester2
                 return NodeState.Running;
             }
 
+            // Keep animator in sync with actual agent speed each tick
+            if (_ctx.Anim != null)
+                _ctx.Anim.SetFloat("Speed", _ctx.Agent.velocity.magnitude);
+
             if (HasReachedWaypoint())
             {
                 // Optionally pause at the waypoint
@@ -141,7 +145,7 @@ namespace Semester2
             _ctx.Agent.isStopped = false;
             _ctx.Agent.speed     = _ctx.Config.WalkSpeed;
             _ctx.Agent.SetDestination(_waypoints[_currentIndex].position);
-            if (_ctx.Anim != null) _ctx.Anim.SetFloat("Speed", _ctx.Config.WalkSpeed);
+            if (_ctx.Anim != null) _ctx.Anim.SetFloat("Speed", _ctx.Agent.velocity.magnitude);
         }
 
         // ── Reservation helpers ──────────────────────────────────────────────────────
