@@ -1,4 +1,4 @@
-# Technical Note
+# Technical Note — AI for Games CA1
 
 ## FSM States and Transition Guards
 
@@ -6,7 +6,7 @@ The NPC uses a custom finite state machine with six states: Idle, Patrol, Chase,
 
 **Idle** is the starting state. The NPC stands still for a short duration before automatically moving to Patrol.
 
-**Patrol** moves the NPC between a set of waypoints in order. Each frame it checks for the player using a combination of detection range, field of view angle, and a line-of-sight raycast. If all three conditions are met the NPC switches to Chase. The NPC can also hear the player, if the player's noise level (higher when running) exceeds a threshold within the hearing range, it also transitions to Chase. When returning to Patrol after a chase, the NPC resumes from the closest waypoint rather than backtracking to wherever it was before.
+**Patrol** moves the NPC between a set of waypoints in order. Each frame it checks for the player using a combination of detection range, field of view angle, and a line-of-sight raycast. If all three conditions are met the NPC switches to Chase. The NPC can also hear the player — if the player's noise level (higher when running) exceeds a threshold within the hearing range, it also transitions to Chase. When returning to Patrol after a chase, the NPC resumes from the closest waypoint rather than backtracking to wherever it was before.
 
 **Chase** runs the NPC toward the player's last known position. It transitions to Attack when the player is within attack range, or to Search if the player moves out of detection range for long enough.
 
