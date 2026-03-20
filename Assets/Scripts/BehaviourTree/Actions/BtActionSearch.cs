@@ -21,9 +21,9 @@ namespace Semester2
         private Vector3[] _searchPoints;
         private int       _currentIndex  = 0;
         private bool      _movingToPoint = true;
-        private float     _searchTimer   = 0f;
-        private float     _pauseTimer    = 0f;
-        private float     _lookTimer     = 0f;
+        private float     _searchStartTime = 0f;
+        private float     _pauseStartTime  = 0f;
+        private float     _lookStartTime   = 0f;
         private Quaternion _targetLook;
 
         // Sound-tracking state.
@@ -50,11 +50,11 @@ namespace Semester2
             if (_ctx.Anim  != null) _ctx.Anim.SetBool("IsFixing", false);
             if (_ctx.Agent != null) _ctx.Agent.updateRotation = true; // re-enable so NPC turns to face movement direction
 
-            _searchTimer          = 0f;
+            _searchStartTime      = Time.time;
             _currentIndex         = 0;
             _movingToPoint        = true;
-            _pauseTimer           = 0f;
-            _lookTimer            = 0f;
+            _pauseStartTime       = 0f;
+            _lookStartTime        = 0f;
             _wasHearingLastTick   = false;
             _lastSoundTrackUpdate = 0f;
 
@@ -79,10 +79,9 @@ namespace Semester2
         protected override NodeState OnTick()
         {
             _ctx.Blackboard.ActiveNodeName = "Search";
-            _searchTimer += Time.deltaTime;
 
             // Timeout — give up and return to patrol
-            if (_searchTimer >= _ctx.Config.MaxSearchDuration)
+            if (Time.time - _searchStartTime >= _ctx.Config.MaxSearchDuration)
             {
                 Debug.Log($"[{_ctx.NpcName}] Search timed out.");
                 _ctx.Blackboard.HasLastKnownPosition = false;
@@ -109,11 +108,11 @@ namespace Semester2
             {
                 Debug.Log($"[{_ctx.NpcName}] Sound lost — switching to fan search.");
                 _wasHearingLastTick = false;
-                _searchTimer   = 0f;   // full timeout from now so the fan gets time
-                _currentIndex  = 0;
-                _movingToPoint = true;
-                _pauseTimer    = 0f;
-                _lookTimer     = 0f;
+                _searchStartTime = Time.time;  // full timeout from now so the fan gets time
+                _currentIndex    = 0;
+                _movingToPoint   = true;
+                _pauseStartTime  = 0f;
+                _lookStartTime   = 0f;
                 GenerateSearchPoints(_ctx.Blackboard.LastKnownPlayerPosition);
                 MoveToCurrentPoint();
             }
@@ -127,9 +126,9 @@ namespace Semester2
 
                 if (HasReachedDestination())
                 {
-                    _movingToPoint = false;
-                    _pauseTimer    = 0f;
-                    _lookTimer     = 0f;
+                    _movingToPoint  = false;
+                    _pauseStartTime = Time.time;
+                    _lookStartTime  = Time.time;
 
                     if (_ctx.Agent != null) _ctx.Agent.isStopped = true;
                     if (_ctx.Anim  != null) _ctx.Anim.SetFloat("Speed", 0f);
@@ -141,10 +140,9 @@ namespace Semester2
             else
             {
                 // Pausing at the point — look around while we wait
-                _pauseTimer += Time.deltaTime;
                 LookAround();
 
-                if (_pauseTimer >= _ctx.Config.SearchPauseDuration)
+                if (Time.time - _pauseStartTime >= _ctx.Config.SearchPauseDuration)
                 {
                     _currentIndex++;
                     if (_currentIndex >= _searchPoints.Length)
@@ -269,10 +267,9 @@ namespace Semester2
 
         private void LookAround()
         {
-            _lookTimer += Time.deltaTime;
-            if (_lookTimer >= LOOK_INTERVAL)
+            if (Time.time - _lookStartTime >= LOOK_INTERVAL)
             {
-                _lookTimer = 0f;
+                _lookStartTime = Time.time;
                 PickRandomLookDirection();
             }
             _ctx.Owner.transform.rotation = Quaternion.Slerp(

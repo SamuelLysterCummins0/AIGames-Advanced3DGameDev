@@ -11,16 +11,18 @@ namespace Semester2
     /// </summary>
     public abstract class BtNode
     {
-        // Tracks the last frame this node was ticked.
-        // A gap of more than one frame means the node was interrupted or is starting fresh.
-        private int _lastTickFrame = -999;
+        // Set this from NpcController to btTickInterval * 1.5f so re-entry detection
+        // works correctly when the BT is throttled rather than ticking every frame.
+        public static float ReEntryGap = 0.15f;
+
+        private float _lastTickTime = -999f;
 
         public NodeState Tick()
         {
-            if (Time.frameCount - _lastTickFrame > 1)
+            if (Time.time - _lastTickTime > ReEntryGap)
                 OnEnter();
 
-            _lastTickFrame = Time.frameCount;
+            _lastTickTime = Time.time;
 
             NodeState result = OnTick();
 

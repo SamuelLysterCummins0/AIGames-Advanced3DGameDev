@@ -33,6 +33,8 @@ The Blackboard is a plain C# class. NpcController writes all perception results 
 
 Also worked on the Advanced 3D CA2 networking feature this session, the networked pickup using Photon Fusion 2.
 
+![BT Files](BehaviourTree.png)
+
 ---
 
 ## Week 8 
@@ -46,4 +48,6 @@ First, the debug overlay was always showing "None" for the active node. It was r
 Second, after chasing the player the NPC was going straight back to Investigate instead of searching first. The PowerBox branch was higher priority than Search, so when the box was still active it always won. Fixed by adding a check to BtCheckPowerBoxActive: if HasLastKnownPosition is true, return Failure. That makes the Selector fall through to Search, and Investigate only resumes after the search clears the flag.
 
 Also added NPC reinforcement tracking this week, when one NPC is chasing the player, nearby NPCs navigate to the live player position and then do a fan search when the alerts stop. On top of that, started CA3 alpha work: weapon spawner, weapon pickup, stealth takedown system, game loop with win and lose states, and a player health system with a health bar, edge vignette, and health regeneration.
+
+![Profiler showing BT tick cost](profiler.png)
 

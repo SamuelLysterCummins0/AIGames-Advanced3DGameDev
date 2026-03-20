@@ -17,9 +17,9 @@ namespace Semester2
         private readonly NpcBtContext _ctx;
         private readonly Transform[] _waypoints;
 
-        private int _currentIndex = 0;
-        private bool _pausing     = false;
-        private float _pauseTimer = 0f;
+        private int   _currentIndex    = 0;
+        private bool  _pausing         = false;
+        private float _pauseStartTime  = 0f;
 
         // ── Waypoint reservation — shared across all BtActionPatrol instances ────────
         // Maps each waypoint Transform to the NPC GameObject that has claimed it.
@@ -41,8 +41,8 @@ namespace Semester2
             Debug.Log($"[{_ctx.NpcName}] <color=green>BT: Patrol entered</color>");
             _ctx.Blackboard.ActiveNodeName = "Patrol";
 
-            _pausing   = false;
-            _pauseTimer = 0f;
+            _pausing        = false;
+            _pauseStartTime = 0f;
 
             if (_ctx.Agent == null || !_ctx.Agent.isActiveAndEnabled || !_ctx.Agent.isOnNavMesh)
                 return;
@@ -76,8 +76,7 @@ namespace Semester2
 
             if (_pausing)
             {
-                _pauseTimer += Time.deltaTime;
-                if (_pauseTimer >= _ctx.Config.WaypointIdleDuration)
+                if (Time.time - _pauseStartTime >= _ctx.Config.WaypointIdleDuration)
                 {
                     _pausing = false;
                     AdvanceWaypoint();
@@ -95,8 +94,8 @@ namespace Semester2
                 // Optionally pause at the waypoint
                 if (_ctx.Config.EnableWaypointIdleStop && Random.value < _ctx.Config.WaypointIdleChance)
                 {
-                    _pausing    = true;
-                    _pauseTimer = 0f;
+                    _pausing        = true;
+                    _pauseStartTime = Time.time;
                     _ctx.Agent.isStopped = true;
                     if (_ctx.Anim != null) _ctx.Anim.SetFloat("Speed", 0f);
                 }

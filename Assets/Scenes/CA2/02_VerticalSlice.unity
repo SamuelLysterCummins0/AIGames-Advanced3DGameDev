@@ -658,7 +658,8 @@ PrefabInstance:
       propertyPath: 'patrolWaypoints.Array.data[7]'
       value: 
       objectReference: {fileID: 6841315729579865161}
-    m_RemovedComponents: []
+    m_RemovedComponents:
+    - {fileID: 1660474008416207498, guid: 420a6e76447271e408f06da1c2fe32f2, type: 3}
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
     m_AddedComponents: []
@@ -7262,6 +7263,7 @@ GameObject:
   m_Component:
   - component: {fileID: 522550831}
   - component: {fileID: 522550830}
+  - component: {fileID: 522550832}
   m_Layer: 0
   m_Name: GameManager
   m_TagString: Untagged
@@ -7300,6 +7302,21 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &522550832
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 522550829}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 39b06949b1ac1ba439e64919ef028508, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Semester2.AllNpcsDebugOverlay
+  toggleKey: 283
+  showOverlay: 1
+  navPathColor: {r: 0, g: 1, b: 1, a: 1}
 --- !u!1 &593810139
 GameObject:
   m_ObjectHideFlags: 0
@@ -10267,7 +10284,8 @@ PrefabInstance:
       propertyPath: 'patrolWaypoints.Array.data[7]'
       value: 
       objectReference: {fileID: 1001724693}
-    m_RemovedComponents: []
+    m_RemovedComponents:
+    - {fileID: 1660474008416207498, guid: 420a6e76447271e408f06da1c2fe32f2, type: 3}
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
     m_AddedComponents: []
@@ -32898,7 +32916,8 @@ PrefabInstance:
       propertyPath: 'patrolWaypoints.Array.data[7]'
       value: 
       objectReference: {fileID: 900647030}
-    m_RemovedComponents: []
+    m_RemovedComponents:
+    - {fileID: 1660474008416207498, guid: 420a6e76447271e408f06da1c2fe32f2, type: 3}
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
     m_AddedComponents: []

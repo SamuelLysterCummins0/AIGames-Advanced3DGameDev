@@ -22,11 +22,11 @@ namespace Semester2
         private enum Phase { MoveToBox, LookAround, Fixing, Complete }
         private Phase _phase;
 
-        private float _lookTimer;
+        private float _lookStartTime;
         private float _initialLookY;
         private const float MAX_LOOK_ANGLE = 90f;
 
-        private float _fixTimer;
+        private float _fixStartTime;
 
         private const string ANIM_SPEED     = "Speed";
         private const string ANIM_IS_FIXING = "IsFixing";
@@ -42,9 +42,9 @@ namespace Semester2
             Debug.Log($"[{_ctx.NpcName}] <color=cyan>BT: Investigate entered</color>");
             _ctx.Blackboard.ActiveNodeName = "Investigate";
 
-            _phase     = Phase.MoveToBox;
-            _lookTimer = 0f;
-            _fixTimer  = 0f;
+            _phase         = Phase.MoveToBox;
+            _lookStartTime = 0f;
+            _fixStartTime  = 0f;
 
             if (_ctx.Agent != null && _ctx.Agent.isActiveAndEnabled && _ctx.Agent.isOnNavMesh)
             {
@@ -110,8 +110,9 @@ namespace Semester2
             switch (_phase)
             {
                 case Phase.LookAround:
-                    float t     = _lookTimer / _ctx.Config.InvestigateLookDuration;
-                    float angle = Mathf.Sin(t * Mathf.PI * 4f) * MAX_LOOK_ANGLE;
+                    float elapsed = Time.time - _lookStartTime;
+                    float t       = elapsed / _ctx.Config.InvestigateLookDuration;
+                    float angle   = Mathf.Sin(t * Mathf.PI * 4f) * MAX_LOOK_ANGLE;
                     _ctx.Owner.transform.rotation = Quaternion.Euler(0f, _initialLookY + angle, 0f);
                     break;
 
@@ -136,8 +137,8 @@ namespace Semester2
         private void TransitionToLookAround(PowerBoxInteractable box)
         {
             Debug.Log($"[{_ctx.NpcName}] Arrived near box - searching area.");
-            _phase     = Phase.LookAround;
-            _lookTimer = 0f;
+            _phase         = Phase.LookAround;
+            _lookStartTime = Time.time;
 
             _initialLookY = Quaternion.LookRotation(box.GetNpcFacingDirection()).eulerAngles.y;
 
@@ -148,9 +149,7 @@ namespace Semester2
 
         private void UpdateLookAround(PowerBoxInteractable box)
         {
-            _lookTimer += Time.deltaTime;
-
-            if (_lookTimer >= _ctx.Config.InvestigateLookDuration)
+            if (Time.time - _lookStartTime >= _ctx.Config.InvestigateLookDuration)
             {
                 _ctx.Owner.transform.rotation = Quaternion.LookRotation(box.GetNpcFacingDirection());
                 TransitionToFixing(box);
@@ -160,8 +159,8 @@ namespace Semester2
         private void TransitionToFixing(PowerBoxInteractable box)
         {
             Debug.Log($"[{_ctx.NpcName}] Starting repair.");
-            _phase    = Phase.Fixing;
-            _fixTimer = 0f;
+            _phase        = Phase.Fixing;
+            _fixStartTime = Time.time;
 
             _ctx.Agent.isStopped = true;
             _ctx.Owner.transform.rotation = Quaternion.LookRotation(box.GetNpcFacingDirection());
@@ -175,7 +174,6 @@ namespace Semester2
 
         private void UpdateFixing(PowerBoxInteractable box)
         {
-            _fixTimer += Time.deltaTime;
             _ctx.Owner.transform.rotation = Quaternion.LookRotation(box.GetNpcFacingDirection());
 
             // Check animation tag first (most reliable)
@@ -190,7 +188,7 @@ namespace Semester2
             }
 
             // Fallback: use the config timer if no fix animation tag is set
-            if (_fixTimer >= _ctx.Config.InvestigateFixDuration)
+            if (Time.time - _fixStartTime >= _ctx.Config.InvestigateFixDuration)
                 CompleteFix(box);
         }
 

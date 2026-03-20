@@ -16,8 +16,8 @@ namespace Semester2
         private float _lastAttackTime  = 0f;
         private float _shootingDistance;
 
-        // Track how long LOS has been lost — only stop firing after a sustained loss
-        private float _losLostTimer = 0f;
+        // Track when LOS was lost — only stop firing after a sustained loss
+        private float _losLostStartTime = -1f;
 
         public BtActionAttack(NpcBtContext ctx)
         {
@@ -34,7 +34,7 @@ namespace Semester2
             Debug.Log($"[{_ctx.NpcName}] <color=red>BT: Attack entered</color>");
             _ctx.Blackboard.ActiveNodeName = "Attack";
 
-            _losLostTimer = 0f;
+            _losLostStartTime = -1f;
 
             if (_ctx.Agent != null && _ctx.Agent.isActiveAndEnabled && _ctx.Agent.isOnNavMesh)
             {
@@ -52,8 +52,8 @@ namespace Semester2
                 _ctx.Anim.SetTrigger("Attack");
             }
 
-            // Allow attacking immediately on entry
-            _lastAttackTime = Time.time - _ctx.Config.AttackCooldown;
+            // _lastAttackTime is NOT reset here so the cooldown from the previous
+            // attack carries over if the player runs away and re-enters range quickly.
         }
 
         protected override NodeState OnTick()
@@ -76,11 +76,11 @@ namespace Semester2
             bool hasLOS = CheckLineOfSight();
             if (!hasLOS)
             {
-                _losLostTimer += Time.deltaTime;
+                if (_losLostStartTime < 0f) _losLostStartTime = Time.time;
             }
             else
             {
-                _losLostTimer = 0f;
+                _losLostStartTime = -1f;
                 if (Time.time >= _lastAttackTime + _ctx.Config.AttackCooldown)
                 {
                     ExecuteAttack();

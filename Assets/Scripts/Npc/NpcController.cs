@@ -1,6 +1,7 @@
 using System.Collections;
 using UnityEngine;
 using UnityEngine.AI;
+using Unity.Profiling;
 
 namespace Semester2
 {
@@ -111,6 +112,10 @@ namespace Semester2
         [SerializeField] private AudioClip   fallClip;
         [SerializeField] private float       fallSoundDelay = 1.8f;
 
+        [Header("Performance")]
+        [Tooltip("How often the BT ticks in seconds. 0.1 = 10 times per second. Lower = more responsive but more CPU.")]
+        [SerializeField] private float btTickInterval = 0.1f;
+
         [Header("Debug Visualization")]
         [SerializeField] private bool showFieldOfView      = true;
         [SerializeField] private bool showDetectionRaycast = true;
@@ -177,6 +182,11 @@ namespace Semester2
         private float               _lastAlertBroadcastTime  = -999f;
         private float               _reinforcementEndTime    = -1f;   // expires when alerts stop arriving
         private Transform           _player;
+        private float               _btTickTimer = 0f;
+
+        // Profiler marker so the BT cost shows up clearly in the Unity Profiler
+        private static readonly ProfilerMarker s_btTickMarker =
+            new ProfilerMarker("NPC.BehaviourTree.Tick");
         private PlayerAudioEmitter  _audioEmitter;
         private Vector3             _lastPlayerPos;
 
@@ -246,8 +256,19 @@ namespace Semester2
         void Update()
         {
             if (_isDead || !_btActive) return;
+
+            // Perception runs every frame so the NPC reacts quickly to the player
             UpdatePerception();
-            _btRoot?.Tick();
+
+            // BT only ticks at btTickInterval to avoid spending the full frame budget on AI
+            _btTickTimer += Time.deltaTime;
+            if (_btTickTimer < btTickInterval) return;
+            _btTickTimer = 0f;
+
+            using (s_btTickMarker.Auto())
+            {
+                _btRoot?.Tick();
+            }
         }
 
         private void UpdatePerception()
@@ -319,6 +340,10 @@ namespace Semester2
 
         private void BuildBehaviourTree()
         {
+            // Tell BtNode how large a time gap counts as a re-entry (interruption).
+            // Must be larger than btTickInterval but smaller than two tick intervals.
+            BtNode.ReEntryGap = btTickInterval * 1.5f;
+
             var ctx = new NpcBtContext(gameObject, Config, _blackboard);
 
             _investigateAction = new BtActionInvestigate(ctx);
@@ -335,10 +360,13 @@ namespace Semester2
                 attackSequence,
                 new BtActionChase(ctx)
             });
+            // BtTimeout aborts the threat response if the player stays visible for over
+            // 30 s without the NPC landing a kill — acts as a fail-safe so Chase never
+            // runs indefinitely if the player becomes unreachable (e.g. climbed somewhere)
             var threatBranch = new BtSequence(new BtNode[]
             {
                 new BtCheckPlayerVisible(_blackboard),
-                threatResponse
+                new BtTimeout(threatResponse, 30f)
             });
 
             // ── Audio search branch — higher priority than PowerBox ───────────────
@@ -366,10 +394,11 @@ namespace Semester2
             // ── Power-box investigation branch ────────────────────────────────────
             // Only reached when neither search branch has work to do. LkpFromChase
             // defers this until any post-chase search clears the visual LKP.
+            // BtTimeout stops Investigate running forever if the box is never reachable.
             var powerBoxBranch = new BtSequence(new BtNode[]
             {
                 new BtCheckPowerBoxActive(_blackboard),
-                _investigateAction
+                new BtTimeout(_investigateAction, 60f)
             });
 
             // ── Patrol fallback (always Running) ──────────────────────────────────
