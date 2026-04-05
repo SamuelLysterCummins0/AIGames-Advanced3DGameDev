@@ -21,6 +21,7 @@ namespace Semester2
         public NetworkBool IsPickedUp { get; set; }
 
         [SerializeField] private MeshRenderer _mesh;
+        [SerializeField] private KeyCode _interactKey = KeyCode.E;
 
         // Fusion 2 uses ChangeDetector instead of the OnChanged attribute from Fusion 1.
         private ChangeDetector _changeDetector;
@@ -46,7 +47,7 @@ namespace Semester2
         /// </summary>
         private void Update()
         {
-            if (Input.GetKeyDown(KeyCode.E) && !IsPickedUp && Object.IsValid)
+            if (Input.GetKeyDown(_interactKey) && !IsPickedUp && Object.IsValid)
                 RPC_RequestPickup();
         }
 

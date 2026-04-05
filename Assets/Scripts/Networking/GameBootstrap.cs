@@ -19,8 +19,8 @@ namespace Semester2
         [SerializeField] private NetworkRunner _runner;
 
         [Header("Spawn")]
-        [SerializeField] private NetworkObject _pickupPrefab;
-        [SerializeField] private Transform     _pickupSpawnPoint;
+        [SerializeField] private NetworkObject[] _pickupPrefabs;
+        [SerializeField] private Transform[]     _pickupSpawnPoints;
 
         [Header("Lobby UI")]
         [SerializeField] private GameObject     _lobbyPanel;
@@ -178,14 +178,17 @@ namespace Semester2
         {
             if (runner.IsServer && !_pickupSpawned)
             {
-                Vector3 spawnPos = _pickupSpawnPoint != null
-                    ? _pickupSpawnPoint.position
-                    : Vector3.zero;
+                for (int i = 0; i < _pickupPrefabs.Length; i++)
+                {
+                    Vector3 spawnPos = (i < _pickupSpawnPoints.Length && _pickupSpawnPoints[i] != null)
+                        ? _pickupSpawnPoints[i].position
+                        : Vector3.zero;
 
-                runner.Spawn(_pickupPrefab, spawnPos, Quaternion.identity);
+                    runner.Spawn(_pickupPrefabs[i], spawnPos, Quaternion.identity);
+                }
+
                 _pickupSpawned = true;
-
-                Debug.Log("[GameBootstrap] <color=cyan>Pickup spawned</color>");
+                Debug.Log("[GameBootstrap] <color=cyan>Pickups spawned: " + _pickupPrefabs.Length + "</color>");
             }
 
             SetStatus(runner.IsServer ? "Player joined — pickup active" : "Joined session");

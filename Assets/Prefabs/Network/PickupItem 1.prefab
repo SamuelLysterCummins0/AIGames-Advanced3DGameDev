@@ -14,9 +14,9 @@ GameObject:
   - component: {fileID: 3330338177179718970}
   - component: {fileID: 2992774988769249049}
   - component: {fileID: 6989830063674951095}
-  - component: {fileID: 7796272413835179337}
+  - component: {fileID: 3780226704130179407}
   m_Layer: 0
-  m_Name: PickupItem
+  m_Name: PickupItem 1
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -70,7 +70,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: c4d9e78be3151b94ba2f2c5e9810bed7, type: 2}
+  - {fileID: 2100000, guid: fc9bf807d9935b54183df177dda775b0, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -127,13 +127,13 @@ MonoBehaviour:
   m_Script: {fileID: -1552182283, guid: e725a070cec140c4caffb81624c8c787, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Fusion.Runtime.dll::Fusion.NetworkObject
-  SortKey: 1953122171
+  SortKey: 1183022392
   ObjectInterest: 1
   Flags: 262145
   NestedObjects: []
   NetworkedBehaviours:
   - {fileID: 6989830063674951095}
-  - {fileID: 7796272413835179337}
+  - {fileID: 3780226704130179407}
   ForceRemoteRenderTimeframe: 0
 --- !u!114 &6989830063674951095
 MonoBehaviour:
@@ -150,8 +150,8 @@ MonoBehaviour:
   _IsPickedUp:
     _value: 0
   _mesh: {fileID: 3710755861841529468}
-  _interactKey: 101
---- !u!114 &7796272413835179337
+  _interactKey: 102
+--- !u!114 &3780226704130179407
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
