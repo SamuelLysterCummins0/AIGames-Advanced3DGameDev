@@ -1,4 +1,5 @@
 using UnityEngine;
+using Fusion;
 
 namespace Semester2
 {
@@ -106,11 +107,35 @@ namespace Semester2
         private float footstepTimer = 0f;
         private MovementState previousMovementState = MovementState.Idle;
 
+        // Cached parent NetworkObject + sync component, used to swap CurrentNoiseLevel
+        // between the locally-computed value (input authority) and the networked value
+        // (remote peers). Without this, remote players' CCs report zero velocity and
+        // NPCs can't hear them.
+        private NetworkObject      _no;
+        private NetworkPlayerSetup _nps;
+
         /// <summary>
-        /// Public read-only access to the current noise level.
-        /// NPCs use this to determine if they can hear the player.
+        /// Locally-computed noise level. NetworkPlayerSetup reads this on the input
+        /// authority and broadcasts it via SyncedNoiseLevel so remote peers can hear it.
         /// </summary>
-        public float CurrentNoiseLevel => currentNoiseLevel;
+        public float LocalNoiseLevel => currentNoiseLevel;
+
+        /// <summary>
+        /// Noise level used by NPCs for hearing checks.
+        /// On the input-authority client, returns the locally-calculated value.
+        /// On remote peers, returns the [Networked] value broadcast by the owning client —
+        /// CharacterController.velocity is only meaningful on the owning client.
+        /// Falls back to the local value when not networked at all.
+        /// </summary>
+        public float CurrentNoiseLevel
+        {
+            get
+            {
+                if (_no != null && _no.IsValid && !_no.HasInputAuthority && _nps != null)
+                    return _nps.SyncedNoiseLevel;
+                return currentNoiseLevel;
+            }
+        }
 
         /// <summary>
         /// Gets the current movement state of the player.
@@ -136,6 +161,11 @@ namespace Semester2
             characterController = GetComponentInChildren<CharacterController>();
             rb = GetComponentInChildren<Rigidbody>();
             navMeshAgent = GetComponentInChildren<UnityEngine.AI.NavMeshAgent>();
+
+            // Cache the parent NetworkObject + setup so CurrentNoiseLevel can swap to
+            // the networked value when this emitter belongs to a remote player.
+            _no  = GetComponentInParent<NetworkObject>();
+            _nps = GetComponentInParent<NetworkPlayerSetup>();
 
             lastPosition = transform.position;
 

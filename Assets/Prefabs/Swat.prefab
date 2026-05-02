@@ -2114,12 +2114,13 @@ GameObject:
   - component: {fileID: 7889261435718476441}
   - component: {fileID: 5475637132089016025}
   - component: {fileID: 7971947595789488062}
-  - component: {fileID: 1660474008416207498}
   - component: {fileID: 4837638539257458337}
   - component: {fileID: 469019952172475173}
   - component: {fileID: 3747662310873238891}
   - component: {fileID: 2159428152722823782}
   - component: {fileID: 2258845749783793128}
+  - component: {fileID: 932201561704307821}
+  - component: {fileID: 5717000913427122261}
   m_Layer: 0
   m_Name: Swat
   m_TagString: NPC
@@ -2209,15 +2210,22 @@ MonoBehaviour:
   npcEyeHeight: 1
   playerCenterHeight: 1
   hearingRange: 7
+  walkNoiseLevel: 0.3
+  runNoiseLevel: 1
   minNoiseThreshold: 0.2
   useOcclusionForSound: 0
   soundOcclusionMult: 0.5
+  hearingNoiseSensitivity: 1
+  verticalHearingPenalty: 3
   walkSpeed: 2
   runSpeed: 3
   waypointReachedThreshold: 0.5
   idleDuration: 3
-  attackCooldown: 1.5
+  attackCooldown: 2
   attackRotationSpeed: 10
+  shootingDistanceRatio: 0.7
+  losLostThreshold: 1
+  attackDamage: 20
   patrolWaypoints:
   - {fileID: 0}
   - {fileID: 0}
@@ -2230,33 +2238,28 @@ MonoBehaviour:
   autoGenerateWaypoints: 0
   waypointRadius: 10
   autoWaypointCount: 4
+  patrolStartDelay: 0
   enableWaypointIdleStop: 1
   waypointIdleChance: 0.401
   waypointIdleDuration: 2
   investigateLookDuration: 6
   investigateFixDuration: 12
+  searchRadius: 8
+  searchPointCount: 4
+  maxSearchDuration: 15
+  searchPauseDuration: 1.5
+  reinforceRange: 15
+  reinforceAlertInterval: 2
+  npcDeathTrigger: Death
   deathAudioSource: {fileID: 2258845749783793128}
   fallClip: {fileID: 8300000, guid: 37ca239ab6fb11b4c995ca2f08a98dec, type: 3}
   fallSoundDelay: 3.5
+  suspicionRiseRate: 0.35
+  suspicionDecayRate: 0.15
+  suspicionAlertThreshold: 0.6
+  btTickInterval: 0.1
   showFieldOfView: 1
   showDetectionRaycast: 1
---- !u!114 &1660474008416207498
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7773094020331427587}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: a2fa7b13a52cdd64c803b8d54b8a8c12, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Semester2.NpcDebugOverlay
-  toggleKey: 257
-  showOverlay: 1
-  showNavPath: 1
-  navPathColor: {r: 0, g: 1, b: 1, a: 1}
-  labelHeightOffset: 2.5
 --- !u!136 &4837638539257458337
 CapsuleCollider:
   m_ObjectHideFlags: 0
@@ -2593,6 +2596,43 @@ AudioSource:
     m_PreInfinity: 2
     m_PostInfinity: 2
     m_RotationOrder: 4
+--- !u!114 &932201561704307821
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7773094020331427587}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: -1552182283, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Fusion.Runtime.dll::Fusion.NetworkObject
+  SortKey: 198987367
+  ObjectInterest: 1
+  Flags: 786433
+  NestedObjects: []
+  NetworkedBehaviours:
+  - {fileID: 7971947595789488062}
+  - {fileID: 5717000913427122261}
+  ForceRemoteRenderTimeframe: 0
+--- !u!114 &5717000913427122261
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7773094020331427587}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 158639473, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Fusion.Runtime.dll::Fusion.NetworkTransform
+  _stateAuthorityChangeErrorCorrectionDelta: 0
+  SyncScale: 0
+  SyncParent: 0
+  _autoAOIOverride: 1
+  DisableSharedModeInterpolation: 0
 --- !u!1 &8025519984205827561
 GameObject:
   m_ObjectHideFlags: 0

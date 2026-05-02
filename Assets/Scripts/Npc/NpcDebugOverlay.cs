@@ -19,9 +19,10 @@ namespace Semester2
         [SerializeField] private Color   navPathColor      = Color.cyan;
         [SerializeField] private float   labelHeightOffset = 2.5f;
 
-        private NavMeshAgent  _agent;
-        private NpcController _controller;
-        private LineRenderer  _pathLine;
+        private NavMeshAgent      _agent;
+        private NpcController     _controller;
+        private PlayerAudioEmitter _audioEmitter;
+        private LineRenderer      _pathLine;
 
         private GUIStyle _boxStyle;
         private GUIStyle _labelStyle;
@@ -32,6 +33,11 @@ namespace Semester2
         {
             _agent      = GetComponent<NavMeshAgent>();
             _controller = GetComponent<NpcController>();
+
+            // Cache the player's audio emitter for live noise-level display
+            GameObject player = GameObject.FindGameObjectWithTag("Player");
+            if (player != null)
+                _audioEmitter = player.GetComponent<PlayerAudioEmitter>();
 
             SetupPathLine();
         }
@@ -82,9 +88,30 @@ namespace Semester2
             if (!_stylesInitialized) InitStyles();
 
             float panelWidth  = 340f;
-            float panelHeight = 275f;
             float padding     = 10f;
             float lineHeight  = 22f;
+
+            // Non-authority clients don't run the BT — show a brief informational panel
+            // instead of an empty blackboard, so it's obvious why values are all zero.
+            bool isAuthority = _controller != null && _controller.IsStateAuthority;
+            if (!isAuthority)
+            {
+                Rect nonAuthRect = new Rect(padding, padding, panelWidth, lineHeight * 4f + 16f);
+                GUI.Box(nonAuthRect, "", _boxStyle);
+                float nx = nonAuthRect.x + 10f;
+                float ny = nonAuthRect.y + 8f;
+                GUI.Label(new Rect(nx, ny, panelWidth - 20f, lineHeight),
+                    $"NPC Debug: {gameObject.name}", _headerStyle);
+                ny += lineHeight + 4f;
+                GUI.Label(new Rect(nx, ny, panelWidth - 20f, lineHeight),
+                    "<color=#ffff00>Non-authority client</color>", _labelStyle);
+                ny += lineHeight;
+                GUI.Label(new Rect(nx, ny, panelWidth - 20f, lineHeight),
+                    "BT runs on host — blackboard not synced.", _labelStyle);
+                return;
+            }
+
+            float panelHeight = 340f;
 
             Rect panelRect = new Rect(padding, padding, panelWidth, panelHeight);
             GUI.Box(panelRect, "", _boxStyle);
@@ -136,6 +163,23 @@ namespace Semester2
                 $"Reinforcing: {reinStr}", _labelStyle);
             y += lineHeight;
 
+            // Suspicion level — bar + numeric value
+            float suspicion      = bb?.SuspicionLevel ?? 0f;
+            Color suspicionColor = Color.Lerp(Color.green, Color.red, suspicion);
+            string suspHex       = ColorUtility.ToHtmlStringRGB(suspicionColor);
+            string suspBar       = BuildBar(suspicion, 16);
+            GUI.Label(new Rect(x, y, panelWidth - 20f, lineHeight),
+                $"Suspicion: <color=#{suspHex}>{suspBar} {suspicion:P0}</color>", _labelStyle);
+            y += lineHeight;
+
+            // Current noise level emitted by the player (perception input, not NPC output)
+            float  noise    = _audioEmitter != null ? _audioEmitter.CurrentNoiseLevel : 0f;
+            string noiseBar = BuildBar(noise, 16);
+            string noiseHex = ColorUtility.ToHtmlStringRGB(Color.Lerp(Color.green, Color.yellow, noise));
+            GUI.Label(new Rect(x, y, panelWidth - 20f, lineHeight),
+                $"Player Noise: <color=#{noiseHex}>{noiseBar} {noise:F2}</color>", _labelStyle);
+            y += lineHeight;
+
             // Nav destination
             string destText = "None";
             if (_agent != null && _agent.hasPath)
@@ -154,6 +198,17 @@ namespace Semester2
 
             GUI.Label(new Rect(x, y, panelWidth - 20f, lineHeight),
                 $"<color=#888888>Press {toggleKey} to toggle</color>", _labelStyle);
+        }
+
+        /// <summary>Builds a fixed-width ASCII progress bar, e.g. "[████████░░░░░░░░]".</summary>
+        private static string BuildBar(float value01, int width)
+        {
+            int filled = Mathf.RoundToInt(Mathf.Clamp01(value01) * width);
+            System.Text.StringBuilder sb = new System.Text.StringBuilder("[", width + 2);
+            for (int i = 0; i < width; i++)
+                sb.Append(i < filled ? '\u2588' : '\u2591');
+            sb.Append(']');
+            return sb.ToString();
         }
 
         private void InitStyles()

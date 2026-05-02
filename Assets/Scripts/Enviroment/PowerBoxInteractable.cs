@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using Fusion;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -9,8 +10,13 @@ namespace Semester2
     /// Handles player interaction with a power box.
     /// When activated, starts electrical sparks and notifies all listeners (NPC, lights)
     /// via static events - no direct references needed (Observer Pattern).
+    ///
+    /// Networked via Fusion: any client can press E to activate, the request is RPC'd
+    /// to the state authority which sets a [Networked] flag, and a ChangeDetector on
+    /// every peer mirrors the activation locally so sparks, lights and NPC assignment
+    /// run on the host (where the NPC behaviour tree lives).
     /// </summary>
-    public class PowerBoxInteractable : MonoBehaviour
+    public class PowerBoxInteractable : NetworkBehaviour
     {
         [Header("Interaction")]
         [Tooltip("How close the player must be to see the interact prompt")]
@@ -50,6 +56,29 @@ namespace Semester2
         private Transform     player;
         private NpcController _assignedNpc;
         private Coroutine     _monitorCoroutine;
+
+        // Networked replication: state authority owns the truth, peers mirror locally.
+        // ChangeDetector in Render() fires Activate()/FixPowerBox() on each peer when
+        // IsActivatedNet flips, so visuals + NPC assignment are consistent everywhere.
+        [Networked] private NetworkBool IsActivatedNet { get; set; }
+        private ChangeDetector _changeDetector;
+
+        public override void Spawned()
+        {
+            _changeDetector = GetChangeDetector(ChangeDetector.Source.SimulationState);
+        }
+
+        public override void Render()
+        {
+            if (_changeDetector == null) return;
+            foreach (var change in _changeDetector.DetectChanges(this))
+            {
+                if (change != nameof(IsActivatedNet)) continue;
+
+                if (IsActivatedNet && !isActivated)      ApplyActivation();
+                else if (!IsActivatedNet && isActivated) ApplyFix();
+            }
+        }
 
         /// <summary>World transform of the box itself (used for facing direction on fix).</summary>
         public Transform BoxTransform => transform;
@@ -101,9 +130,9 @@ namespace Semester2
 
         void Start()
         {
-            GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
-            if (playerObj != null)
-                player = playerObj.transform;
+            // Don't cache here — the local player may not be spawned yet (Fusion spawns
+            // players asynchronously after scene load). Update() resolves it lazily.
+            player = null;
 
             if (interactPromptUI != null)
                 interactPromptUI.SetActive(false);
@@ -121,8 +150,14 @@ namespace Semester2
 
         void Update()
         {
+            if (player == null)
+            {
+                ResolveLocalPlayer();
+                if (player == null) return;
+            }
+
             // Once activated, hide prompt and skip interaction checks
-            if (isActivated || player == null)
+            if (isActivated)
             {
                 if (interactPromptUI != null) interactPromptUI.SetActive(false);
                 return;
@@ -135,10 +170,57 @@ namespace Semester2
                 interactPromptUI.SetActive(inRange);
 
             if (inRange && Input.GetKeyDown(interactKey))
-                Activate();
+            {
+                // Route activation through the state authority so the host runs the NPC
+                // assignment (BT only ticks on the authority) and every peer mirrors the
+                // sparks / lights via the ChangeDetector in Render().
+                if (Runner != null && Object != null && Object.IsValid)
+                    RPC_RequestActivate();
+                else
+                    ApplyActivation(); // non-networked fallback
+            }
         }
 
-        private void Activate()
+        [Rpc(RpcSources.All, RpcTargets.StateAuthority)]
+        private void RPC_RequestActivate()
+        {
+            if (IsActivatedNet) return;
+            IsActivatedNet = true;
+        }
+
+        /// <summary>
+        /// Locks onto the local player's CharacterController child so distance checks
+        /// use the actual moving capsule, not the NetworkObject root which never moves.
+        /// In single-player there's only one Player tag, so the CC is found and used.
+        /// </summary>
+        private void ResolveLocalPlayer()
+        {
+            GameObject[] tagged = GameObject.FindGameObjectsWithTag("Player");
+            if (tagged.Length == 0) return;
+
+            foreach (GameObject obj in tagged)
+            {
+                NetworkObject no = obj.GetComponentInParent<NetworkObject>()
+                                ?? obj.GetComponentInChildren<NetworkObject>();
+
+                // Networked: only lock onto the local player's instance.
+                // Without this, FindGameObjectWithTag could grab the remote player and the
+                // distance check would always fire from their spawn point — neither client
+                // would ever appear to be in range of the box.
+                if (no != null && !no.HasInputAuthority) continue;
+
+                CharacterController cc = obj.GetComponentInChildren<CharacterController>();
+                player = cc != null ? cc.transform : obj.transform;
+                return;
+            }
+        }
+
+        /// <summary>
+        /// Mirrors the activation locally on every peer once IsActivatedNet flips true.
+        /// Sparks + lights run on every client; NPC selection runs only on the state
+        /// authority (host) because the BT only ticks there.
+        /// </summary>
+        private void ApplyActivation()
         {
             isActivated = true;
 
@@ -151,7 +233,10 @@ namespace Semester2
             Debug.Log($"[PowerBox] {name} activated - sparking!");
             OnPowerBoxActivated?.Invoke(this); // lights/audio subscribe here
 
-            SelectAndAssignResponder();
+            // Only the state authority drives NPC AI — running this on the client too
+            // would assign repair to a non-authority NPC and the BT wouldn't react.
+            if (Object == null || Object.HasStateAuthority)
+                SelectAndAssignResponder();
         }
 
         private void SelectAndAssignResponder()
@@ -255,9 +340,26 @@ namespace Semester2
 
         /// <summary>
         /// Called by NpcInvestigateState when the NPC finishes the fix animation.
-        /// Stops sparks and fires the Fixed event so lights can restore.
+        /// Runs on the state authority only; flips the [Networked] flag so peers mirror
+        /// the fix via ChangeDetector → ApplyFix.
         /// </summary>
         public void FixPowerBox()
+        {
+            if (!isActivated) return;
+
+            // Only the state authority writes networked state — peers will mirror via Render().
+            if (Object != null && Object.HasStateAuthority)
+                IsActivatedNet = false;
+            else if (Object == null)
+                ApplyFix(); // non-networked fallback
+        }
+
+        /// <summary>
+        /// Local visual + bookkeeping when the box gets fixed. Called from Render() on
+        /// every peer when IsActivatedNet flips false (and from FixPowerBox in the
+        /// non-networked fallback path).
+        /// </summary>
+        private void ApplyFix()
         {
             if (!isActivated) return;
 

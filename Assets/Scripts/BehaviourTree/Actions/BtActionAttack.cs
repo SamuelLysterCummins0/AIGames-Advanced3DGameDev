@@ -45,11 +45,13 @@ namespace Semester2
 
             if (_ctx.Anim != null)
             {
-                // Clear fixing animation in case we interrupted Investigate directly
+                // Clear any other animation state but do NOT fire the Attack trigger here.
+                // ExecuteAttack() fires it on cooldown — firing it on every OnEnter causes
+                // animation flicker when the attack sequence rapidly enters/exits at the
+                // range boundary (especially visible for networked remote players).
                 _ctx.Anim.SetBool("IsFixing", false);
                 _ctx.Anim.SetFloat("Speed", 0f);
                 _ctx.Anim.ResetTrigger("Attack");
-                _ctx.Anim.SetTrigger("Attack");
             }
 
             // _lastAttackTime is NOT reset here so the cooldown from the previous
@@ -101,7 +103,7 @@ namespace Semester2
         {
             if (_ctx.Player == null) return false;
             Vector3 eye    = _ctx.Owner.transform.position + Vector3.up * _ctx.Config.NpcEyeHeight;
-            Vector3 target = _ctx.Player.position + Vector3.up * _ctx.Config.PlayerCenterHeight;
+            Vector3 target = _ctx.PlayerWorldPosition + Vector3.up * _ctx.Config.PlayerCenterHeight;
             Vector3 dir    = target - eye;
             return !Physics.Raycast(eye, dir.normalized, dir.magnitude, _ctx.Config.ObstacleLayerMask);
         }
@@ -109,7 +111,7 @@ namespace Semester2
         private void MoveAwayFromPlayer()
         {
             if (_ctx.Player == null || _ctx.Agent == null) return;
-            Vector3 dir = (_ctx.Owner.transform.position - _ctx.Player.position).normalized;
+            Vector3 dir = (_ctx.Owner.transform.position - _ctx.PlayerWorldPosition).normalized;
             _ctx.Agent.isStopped = false;
             _ctx.Agent.SetDestination(_ctx.Owner.transform.position + dir);
             if (_ctx.Anim != null) _ctx.Anim.SetFloat("Speed", _ctx.Agent.velocity.magnitude);
@@ -119,7 +121,7 @@ namespace Semester2
         {
             if (_ctx.Player == null || _ctx.Agent == null) return;
             _ctx.Agent.isStopped = false;
-            _ctx.Agent.SetDestination(_ctx.Player.position);
+            _ctx.Agent.SetDestination(_ctx.PlayerWorldPosition);
             if (_ctx.Anim != null) _ctx.Anim.SetFloat("Speed", _ctx.Agent.velocity.magnitude);
         }
 
@@ -134,7 +136,7 @@ namespace Semester2
         private void FacePlayer()
         {
             if (_ctx.Player == null) return;
-            Vector3 dir = (_ctx.Player.position - _ctx.Owner.transform.position).normalized;
+            Vector3 dir = (_ctx.PlayerWorldPosition - _ctx.Owner.transform.position).normalized;
             dir.y = 0f;
             if (dir == Vector3.zero) return;
             _ctx.Owner.transform.rotation = Quaternion.Slerp(
@@ -147,18 +149,26 @@ namespace Semester2
         private void ExecuteAttack()
         {
             Debug.Log($"[{_ctx.NpcName}] <color=red>Attacking!</color>");
-            if (_ctx.Anim != null)
-            {
-                _ctx.Anim.ResetTrigger("Attack");
-                _ctx.Anim.SetTrigger("Attack");
-            }
+
+            // Notify NpcController to increment AttackTick — Render() on all peers fires
+            // the Attack trigger locally so the animation plays on every client's screen.
+            _ctx.OnAttackFired?.Invoke();
+
             _gunAudio?.PlayShot();
 
-            // Deal damage to the player if they have a health component
+            // Route damage via RPC so the correct client's PlayerHealth is updated.
+            // In Shared Mode each player owns their own NetworkObject, so TakeDamage
+            // must reach the StateAuthority of the target player — not just the host.
             if (_ctx.Player != null)
             {
-                PlayerHealth health = _ctx.Player.GetComponent<PlayerHealth>();
-                health?.TakeDamage(_ctx.Config.AttackDamage);
+                PlayerHealth health = _ctx.Player.GetComponent<PlayerHealth>()
+                                   ?? _ctx.Player.GetComponentInParent<PlayerHealth>()
+                                   ?? _ctx.Player.GetComponentInChildren<PlayerHealth>();
+
+                if (health != null && health.Runner != null)
+                    health.RPC_TakeDamage(_ctx.Config.AttackDamage);
+                else
+                    health?.TakeDamage(_ctx.Config.AttackDamage); // non-networked fallback
             }
         }
     }

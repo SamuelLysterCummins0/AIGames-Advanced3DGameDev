@@ -80,6 +80,14 @@ namespace Semester2
         public float LosLostThreshold      { get; set; }
         public float AttackDamage          { get; set; }
 
+        // Suspicion accumulation
+        // Rise: per-second increase when the player is partially detected (peripheral/heard).
+        // Decay: per-second decrease when nothing is detected.
+        // AlertThreshold: 0-1 level at which the NPC sets a LKP and begins searching.
+        public float SuspicionRiseRate       { get; set; }
+        public float SuspicionDecayRate      { get; set; }
+        public float SuspicionAlertThreshold { get; set; }
+
         /// <summary>
         /// Creates default configuration values.
         /// </summary>
@@ -125,7 +133,10 @@ namespace Semester2
                 SearchPauseDuration     = 1.5f,
                 ShootingDistanceRatio   = 0.7f,
                 LosLostThreshold        = 1f,
-                AttackDamage            = 34f
+                AttackDamage            = 34f,
+                SuspicionRiseRate       = 0.35f,
+                SuspicionDecayRate      = 0.15f,
+                SuspicionAlertThreshold = 0.6f
             };
         }
     }

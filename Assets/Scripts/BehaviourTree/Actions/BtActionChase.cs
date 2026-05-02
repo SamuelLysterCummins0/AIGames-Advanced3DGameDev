@@ -53,7 +53,7 @@ namespace Semester2
             // Rate-limit destination updates to avoid recalculating the path every frame
             if (Time.time - _lastDestinationUpdate > DEST_UPDATE_INTERVAL && !_ctx.Agent.pathPending)
             {
-                _ctx.Agent.SetDestination(_ctx.Player.position);
+                _ctx.Agent.SetDestination(_ctx.PlayerWorldPosition);
                 _lastDestinationUpdate = Time.time;
             }
 

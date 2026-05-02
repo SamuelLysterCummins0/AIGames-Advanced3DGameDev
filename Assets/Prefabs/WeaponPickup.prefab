@@ -587,6 +587,8 @@ GameObject:
   m_Component:
   - component: {fileID: 2088614095437837606}
   - component: {fileID: 1034684865597525133}
+  - component: {fileID: 8985014379459303881}
+  - component: {fileID: 8135581386154302971}
   m_Layer: 0
   m_Name: WeaponPickup
   m_TagString: Untagged
@@ -622,4 +624,43 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0f3a0c669c5990747b7439bd6e56fcea, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Semester2.WeaponPickup
+  pickupRange: 2.5
   pickupKey: 101
+  _model: {fileID: 4689183910091195882}
+--- !u!114 &8985014379459303881
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9118646197675416860}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: -1552182283, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Fusion.Runtime.dll::Fusion.NetworkObject
+  SortKey: 3578137141
+  ObjectInterest: 1
+  Flags: 262145
+  NestedObjects: []
+  NetworkedBehaviours:
+  - {fileID: 1034684865597525133}
+  - {fileID: 8135581386154302971}
+  ForceRemoteRenderTimeframe: 0
+--- !u!114 &8135581386154302971
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9118646197675416860}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 158639473, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Fusion.Runtime.dll::Fusion.NetworkTransform
+  _stateAuthorityChangeErrorCorrectionDelta: 0
+  SyncScale: 0
+  SyncParent: 0
+  _autoAOIOverride: 1
+  DisableSharedModeInterpolation: 0

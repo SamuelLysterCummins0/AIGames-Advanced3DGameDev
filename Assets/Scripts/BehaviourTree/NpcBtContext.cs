@@ -14,8 +14,10 @@ namespace Semester2
         public readonly GameObject Owner;
         public readonly NavMeshAgent Agent;
         public readonly Animator Anim;
-        public readonly Transform Player;
-        public readonly PlayerAudioEmitter AudioEmitter;
+        public Transform Player;
+        public Vector3   PlayerWorldPosition; // synced world position — use this instead of Player.position on the host
+        public PlayerAudioEmitter AudioEmitter;
+        public System.Action OnAttackFired; // called by BtActionAttack on each shot to sync animation across peers
         public readonly NpcConfig Config;
         public readonly NpcBlackboard Blackboard;
 

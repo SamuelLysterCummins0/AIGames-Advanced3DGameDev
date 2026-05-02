@@ -82,6 +82,7 @@ namespace Semester2
         // Cached components
         private FirstPersonController             _fpsController;
         private StarterAssets.StarterAssetsInputs _inputs;
+        private CharacterController               _characterController;
         private AudioSource[]                     _allPlayerAudio;
         private AudioSource                       _stabAudio;
         private PlayerAudioEmitter                _playerAudioEmitter;
@@ -94,8 +95,15 @@ namespace Semester2
 
         void Start()
         {
-            _fpsController = GetComponent<FirstPersonController>();
-            _inputs        = GetComponent<StarterAssets.StarterAssetsInputs>();
+            // Search the whole player hierarchy — in some prefab layouts these components
+            // sit on a different GameObject from PlayerTakedownController, and a same-GO
+            // GetComponent silently returns null, leaving the player able to move during
+            // their own takedown animation.
+            _fpsController       = GetComponent<FirstPersonController>()
+                                ?? transform.root.GetComponentInChildren<FirstPersonController>(true);
+            _inputs              = GetComponent<StarterAssets.StarterAssetsInputs>()
+                                ?? transform.root.GetComponentInChildren<StarterAssets.StarterAssetsInputs>(true);
+            _characterController = transform.root.GetComponentInChildren<CharacterController>(true);
 
             // Cache every AudioSource in the entire player hierarchy (root + all children) so
             // we can silence them all during a takedown. Using transform.root ensures we catch
@@ -114,6 +122,18 @@ namespace Semester2
                 Debug.LogWarning("[PlayerTakedownController] PromptUI not assigned in Inspector.");
             if (cameraRoot == null)
                 Debug.LogWarning("[PlayerTakedownController] CameraRoot not assigned — camera won't move during takedown.");
+
+            // Defer by one frame: Fusion's Spawned() fires before Unity's Start(), so
+            // NetworkPlayerSetup.Spawned() enables _localOnlyObjects (which may contain
+            // promptUI) AFTER this Start() call. Waiting one frame guarantees we hide
+            // the prompt last, after the hierarchy is fully activated.
+            StartCoroutine(HidePromptAfterSpawn());
+        }
+
+        private IEnumerator HidePromptAfterSpawn()
+        {
+            yield return null;
+            if (promptUI != null) promptUI.SetActive(false);
         }
 
         void OnDisable()
@@ -124,6 +144,16 @@ namespace Semester2
         void Update()
         {
             if (_isAnimating) return;
+
+            // Takedown is only available after the weapon has been picked up
+            bool weaponReady = GameManager.Instance != null
+                            && GameManager.Instance.State == GameState.TakedownGuards;
+
+            if (!weaponReady)
+            {
+                if (promptUI != null) promptUI.SetActive(false);
+                return;
+            }
 
             _nearbyTarget = FindTakedownTarget();
 
@@ -177,6 +207,9 @@ namespace Semester2
                 // ── 1. Lock controls + hide prompt immediately ────────────────────────────
                 if (_fpsController != null) _fpsController.enabled = false;
                 if (_inputs != null) { _inputs.move = Vector2.zero; _inputs.look = Vector2.zero; }
+                // Belt-and-braces: even if FPC reference grab failed, disabling the CC
+                // guarantees no Move() calls reach the capsule during the animation.
+                if (_characterController != null) _characterController.enabled = false;
                 if (promptUI != null) promptUI.SetActive(false);
                 // Disable footstep emitter so it can't fire new PlayOneShot calls mid-animation
                 if (_playerAudioEmitter != null) _playerAudioEmitter.enabled = false;
@@ -212,7 +245,10 @@ namespace Semester2
                     StartCoroutine(HidePlayerBodyAfter(playerBodyHideDuration));
                 }
                 if (playerAnimator != null) playerAnimator.SetTrigger(takedownTrigger);
-                npc.StartTakedown(animationDuration);
+
+                // Network the kill — every peer runs StartTakedown locally, so the NPC
+                // actually dies for the host too, not just on the killer's screen.
+                npc.RPC_StartTakedown(animationDuration);
 
                 // ── 5. Stab sound at the moment the blade connects ────────────────────────
                 if (stabSound != null && _stabAudio != null)
@@ -229,6 +265,7 @@ namespace Semester2
             // as a safety net in case playerBodyHideDuration was set longer than animationDuration.
             if (playerBody != null) playerBody.SetActive(false);
             if (promptUI   != null) promptUI.SetActive(false);
+            if (_characterController != null) _characterController.enabled = true;
             if (_fpsController != null) _fpsController.enabled = true;
             if (_playerAudioEmitter != null) _playerAudioEmitter.enabled = true;
 

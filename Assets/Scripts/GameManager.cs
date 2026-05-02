@@ -28,7 +28,6 @@ namespace Semester2
 
         private NpcController[]          _npcs;
         private PlayerTakedownController _takedownController;
-        private FirstPersonController    _fpsController;
 
         void Awake()
         {
@@ -44,11 +43,8 @@ namespace Semester2
         {
             _npcs               = FindObjectsByType<NpcController>(FindObjectsSortMode.None);
             _takedownController = FindObjectOfType<PlayerTakedownController>();
-            _fpsController      = FindObjectOfType<FirstPersonController>();
 
-            // Cursor state persists across scene reloads — reset it every time the game starts
-            Cursor.lockState = CursorLockMode.Locked;
-            Cursor.visible   = false;
+            // Cursor is managed by GameBootstrap (lobby = unlocked, session = locked)
 
             if (_takedownController != null)
                 _takedownController.enabled = false;
@@ -100,11 +96,21 @@ namespace Semester2
             SetState(GameState.Defeat);
         }
 
-        /// <summary>Reloads the current scene — wired to both restart buttons.</summary>
+        /// <summary>Respawns the player without leaving the session — wired to the restart button.</summary>
         public void RestartGame()
         {
-            Time.timeScale = 1f; // Unpause before loading
-            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+            Time.timeScale = 1f;
+
+            GameBootstrap bootstrap = FindObjectOfType<GameBootstrap>();
+            if (bootstrap != null)
+            {
+                bootstrap.RespawnLocalPlayer();
+                SetState(GameState.FindWeapon);
+            }
+            else
+            {
+                SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+            }
         }
 
         private void SetState(GameState newState)
@@ -144,12 +150,17 @@ namespace Semester2
         /// <summary>
         /// Unlocks and shows the cursor and disables FPS look so the player
         /// can click UI buttons on the win/lose screen.
+        /// Disables ALL FirstPersonControllers in the scene — in multiplayer
+        /// FindObjectOfType can return the remote player's (already-disabled) FPC,
+        /// leaving the local player's FPC running and re-locking the cursor every frame.
         /// </summary>
         private void ShowCursor()
         {
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible   = true;
-            if (_fpsController != null) _fpsController.enabled = false;
+
+            foreach (var fpc in FindObjectsByType<FirstPersonController>(FindObjectsSortMode.None))
+                fpc.enabled = false;
         }
     }
 }

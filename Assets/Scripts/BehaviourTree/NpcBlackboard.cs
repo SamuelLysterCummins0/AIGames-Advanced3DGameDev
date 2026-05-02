@@ -36,6 +36,12 @@ namespace Semester2
         public bool PowerBoxActive;
         public PowerBoxInteractable TargetPowerBox;
 
+        // --- Suspicion (written by NpcController.AccumulateSuspicion each frame) ---
+        // Rises when the player is partially detected (peripheral vision, heard at low volume).
+        // Decays when nothing is detected. At SuspicionAlertThreshold the NPC sets a
+        // last-known position and searches, even without full visual or audio confirmation.
+        public float SuspicionLevel;
+
         // --- Debug Info (written by action nodes during Tick) ---
         // Stores the name of whichever action is currently running.
         public string ActiveNodeName = "None";

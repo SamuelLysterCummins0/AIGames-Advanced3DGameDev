@@ -1,4 +1,5 @@
 using System.Collections;
+using Fusion;
 using UnityEngine;
 using UnityEngine.AI;
 using Unity.Profiling;
@@ -28,7 +29,7 @@ namespace Semester2
     /// When the player is newly heard the post-chase cooldown is reset so audio
     /// cues are never blocked by a leftover cooldown from a previous search.
     /// </summary>
-    public class NpcController : MonoBehaviour
+    public class NpcController : NetworkBehaviour
     {
         [Header("NPC Detection Settings")]
         [SerializeField] private float detectionRange = 10f;
@@ -112,6 +113,15 @@ namespace Semester2
         [SerializeField] private AudioClip   fallClip;
         [SerializeField] private float       fallSoundDelay = 1.8f;
 
+        [Header("Suspicion Settings")]
+        [Tooltip("How fast (per second) suspicion rises when the player is partially detected (peripheral vision or heard).")]
+        [SerializeField] private float suspicionRiseRate       = 0.35f;
+        [Tooltip("How fast (per second) suspicion decays when nothing is detected.")]
+        [SerializeField] private float suspicionDecayRate      = 0.15f;
+        [Tooltip("Suspicion level (0-1) at which the NPC sets a last-known position and begins searching.")]
+        [Range(0f, 1f)]
+        [SerializeField] private float suspicionAlertThreshold = 0.6f;
+
         [Header("Performance")]
         [Tooltip("How often the BT ticks in seconds. 0.1 = 10 times per second. Lower = more responsive but more CPU.")]
         [SerializeField] private float btTickInterval = 0.1f;
@@ -142,9 +152,9 @@ namespace Semester2
         /// <summary>The player transform cached at Start.</summary>
         public Transform PlayerTransform => _player;
 
-        /// <summary>Current distance to the player (live calculation).</summary>
+        /// <summary>Current distance to the player using the synced world position.</summary>
         public float DistanceToPlayer => _player != null
-            ? Vector3.Distance(transform.position, _player.position)
+            ? Vector3.Distance(transform.position, _playerWorldPos)
             : float.MaxValue;
 
         /// <summary>
@@ -155,6 +165,9 @@ namespace Semester2
 
         /// <summary>True after StartTakedown() is called. PowerBoxInteractable uses this to detect handoff.</summary>
         public bool IsDead => _isDead;
+
+        /// <summary>True when Fusion has given this client state authority over this NPC.</summary>
+        public bool IsStateAuthority => _isAuthority;
 
         /// <summary>
         /// True when this NPC can be assigned to investigate a power box.
@@ -174,6 +187,7 @@ namespace Semester2
         // ── Private fields ─────────────────────────────────────────────────────────
 
         private NpcBlackboard       _blackboard;
+        private NpcBtContext        _btContext;
         private BtNode              _btRoot;
         private BtCooldown          _postChaseSearchCooldown; // kept so we can reset it on new audio cues
         private BtActionInvestigate _investigateAction; // kept so LateUpdate can call ReapplyRotation
@@ -182,7 +196,11 @@ namespace Semester2
         private float               _lastAlertBroadcastTime  = -999f;
         private float               _reinforcementEndTime    = -1f;   // expires when alerts stop arriving
         private Transform           _player;
+        private Vector3             _playerWorldPos; // synced world position — correct on host for remote players
+        private NetworkObject       _playerNo;       // cached NetworkObject for the current player target
         private float               _btTickTimer = 0f;
+        private float               _sightConfirmedUntil = 0f; // grace period — keeps PlayerVisible true for 0.5s after LOS lost
+        private float               _diagTimer = 0f;           // slow-movement diagnostic — remove once root cause confirmed
 
         // Profiler marker so the BT cost shows up clearly in the Unity Profiler
         private static readonly ProfilerMarker s_btTickMarker =
@@ -190,7 +208,68 @@ namespace Semester2
         private PlayerAudioEmitter  _audioEmitter;
         private Vector3             _lastPlayerPos;
 
-        // ── Unity lifecycle ────────────────────────────────────────────────────────
+        // ── Networking ─────────────────────────────────────────────────────────────
+        // Set in Spawned() once Fusion has assigned StateAuthority.
+        // Only the authority client (master client in Shared mode) runs the BT.
+        // Non-authority clients follow the position synced by NetworkTransform.
+        private bool          _isAuthority;
+        private Animator      _animator;
+        private NavMeshAgent  _navAgent;    // cached to avoid repeated GetComponent calls
+        private Vector3       _lastNetworkPos; // for velocity-based animation on non-authority
+        private float         _playerRefreshTimer;
+
+        // Incremented by the state authority each time the NPC fires a shot.
+        // Render() detects the change on all peers and fires the Attack trigger locally
+        // so the shooting animation plays on every client, not just the host.
+        [Networked] private int AttackTick { get; set; }
+        private ChangeDetector _cd;
+
+        // ── Unity / Fusion lifecycle ───────────────────────────────────────────────
+
+        void Awake()
+        {
+            // Without this, the unfocused editor throttles to ~10 FPS when no input is
+            // happening, which makes the NavMeshAgent visibly crawl on the host while
+            // the focused client editor runs at full speed.
+            Application.runInBackground = true;
+            if (Application.targetFrameRate < 60) Application.targetFrameRate = 60;
+
+            _animator = GetComponentInChildren<Animator>();
+            _navAgent = GetComponent<NavMeshAgent>();
+
+            // Root motion must be off for ALL instances — on state authority it fights the
+            // NavMeshAgent (Mixamo animations have root bone movement that resists path-following),
+            // on non-authority it fights NetworkTransform position updates.
+            if (_animator != null) _animator.applyRootMotion = false;
+
+            // Disable NavMeshAgent before Fusion assigns StateAuthority.
+            // Spawned() re-enables it only for the authority so the agent never fights
+            // NetworkTransform position updates on non-authority peers.
+            if (_navAgent != null) _navAgent.enabled = false;
+        }
+
+        public override void Spawned()
+        {
+            _isAuthority    = Object.HasStateAuthority;
+            _lastNetworkPos = transform.position;
+            _cd             = GetChangeDetector(ChangeDetector.Source.SimulationState);
+
+            if (!_isAuthority)
+            {
+                Debug.Log($"[{name}] <color=grey>Non-authority client — BT disabled, following NetworkTransform.</color>");
+            }
+            else
+            {
+                // Authority owns the NavMeshAgent — re-enable it so the BT can path.
+                if (_navAgent != null) _navAgent.enabled = true;
+
+                // Note: Fusion's NetworkTransform interpolation can't be turned off via API in
+                // this project's Fusion version. The Render() + LateUpdate() overrides below
+                // re-assert the navAgent position after NetworkTransform runs, which is enough.
+
+                Debug.Log($"[{name}] <color=cyan>State authority — BT active.</color>");
+            }
+        }
 
         void Start()
         {
@@ -228,15 +307,13 @@ namespace Semester2
                 SearchPauseDuration      = searchPauseDuration,
                 ShootingDistanceRatio    = shootingDistanceRatio,
                 LosLostThreshold         = losLostThreshold,
-                AttackDamage             = attackDamage
+                AttackDamage             = attackDamage,
+                SuspicionRiseRate        = suspicionRiseRate,
+                SuspicionDecayRate       = suspicionDecayRate,
+                SuspicionAlertThreshold  = suspicionAlertThreshold
             };
 
-            GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
-            if (playerObj != null)
-            {
-                _player       = playerObj.transform;
-                _audioEmitter = playerObj.GetComponent<PlayerAudioEmitter>();
-            }
+            ResolvePlayerReference();
 
             if (autoGenerateWaypoints && (patrolWaypoints == null || patrolWaypoints.Length == 0))
                 GenerateWaypoints();
@@ -244,7 +321,7 @@ namespace Semester2
             _blackboard = new NpcBlackboard();
             BuildBehaviourTree();
 
-            if (_player != null) _lastPlayerPos = _player.position;
+            if (_player != null) _lastPlayerPos = _playerWorldPos;
 
             // Delay BT activation so two mirrored-waypoint NPCs never start in sync.
             if (patrolStartDelay > 0f)
@@ -255,7 +332,32 @@ namespace Semester2
 
         void Update()
         {
+            // Non-authority: BT doesn't run. Drive the Animator from the position delta
+            // so walk/run animations play correctly based on how fast the NPC is moving.
+            if (!_isAuthority)
+            {
+                if (_animator != null)
+                {
+                    float speed = (transform.position - _lastNetworkPos).magnitude / Time.deltaTime;
+                    _animator.SetFloat("Speed", speed);
+                }
+                _lastNetworkPos = transform.position;
+                return;
+            }
+
             if (_isDead || !_btActive) return;
+
+            // Slow-movement diagnostic — logs navmesh speed/velocity every 2 s on the host.
+            // Remove once the root cause is confirmed.
+            _diagTimer += Time.deltaTime;
+            if (_diagTimer >= 2f && _navAgent != null)
+            {
+                _diagTimer = 0f;
+                Debug.Log($"[{name}] <color=white>DIAG node={_blackboard?.ActiveNodeName} " +
+                          $"speed={_navAgent.speed:F1} vel={_navAgent.velocity.magnitude:F2} " +
+                          $"stopped={_navAgent.isStopped} pathStatus={_navAgent.pathStatus} " +
+                          $"dt={Time.deltaTime:F4}</color>");
+            }
 
             // Perception runs every frame so the NPC reacts quickly to the player
             UpdatePerception();
@@ -273,20 +375,52 @@ namespace Semester2
 
         private void UpdatePerception()
         {
+            // Refresh the best-threat player every 0.5 s.
+            // Scans ALL Player-tagged objects so a second player that walks into range
+            // is picked up even when another player is technically the global nearest.
+            // Priority: nearest visible > nearest heard > nearest overall.
+            _playerRefreshTimer += Time.deltaTime;
+            if (_player == null || _playerRefreshTimer >= 0.5f)
+            {
+                _playerRefreshTimer = 0f;
+                ResolvePlayerReference();
+                if (_player == null) return;
+
+                if (_btContext != null)
+                {
+                    _btContext.Player             = _player;
+                    _btContext.AudioEmitter       = _audioEmitter;
+                }
+            }
+
+            // Refresh synced position every frame (not just on resolve) so the NPC always
+            // has the latest capsule position that the owning client published this tick.
+            if (_playerNo != null)
+                _playerWorldPos = GetSyncedPosition(_playerNo);
+
+            if (_btContext != null)
+                _btContext.PlayerWorldPosition = _playerWorldPos;
+
             _blackboard.DistanceToPlayer = DistanceToPlayer;
 
-            bool wasVisible = _blackboard.PlayerVisible; // capture before overwriting
+            bool wasVisible = _blackboard.PlayerVisible;
             bool canSee     = CanSeePlayer();
-            _blackboard.PlayerVisible = canSee;
+
+            // Grace period: keep PlayerVisible true for 0.5 s after LOS is lost.
+            // SyncedPosition updates at ~30 Hz so the position can be one tick stale,
+            // causing brief LOS failures when P2 is near a wall — without this the NPC
+            // flickers between Attack and Search every ~50 ms.
+            if (canSee) _sightConfirmedUntil = Time.time + 0.5f;
+            _blackboard.PlayerVisible = canSee || Time.time < _sightConfirmedUntil;
 
             if (canSee && _player != null)
             {
                 // Track player movement direction for directional search points
-                Vector3 vel = (_player.position - _lastPlayerPos) / Time.deltaTime;
+                Vector3 vel = (_playerWorldPos - _lastPlayerPos) / Time.deltaTime;
                 if (vel.sqrMagnitude > 0.01f)
                     _blackboard.LastKnownPlayerMoveDir = vel.normalized;
 
-                _blackboard.LastKnownPlayerPosition = _player.position;
+                _blackboard.LastKnownPlayerPosition = _playerWorldPos;
                 _blackboard.HasLastKnownPosition    = true;
                 _blackboard.LkpFromChase            = true; // visual contact — defer Investigate
 
@@ -294,7 +428,7 @@ namespace Semester2
                 // so reinforcing NPCs keep getting an updated last-known position.
                 if (!wasVisible || Time.time - _lastAlertBroadcastTime >= reinforceAlertInterval)
                 {
-                    OnNpcAlerting?.Invoke(this, _player.position);
+                    OnNpcAlerting?.Invoke(this, _playerWorldPos);
                     _lastAlertBroadcastTime = Time.time;
                 }
             }
@@ -323,7 +457,9 @@ namespace Semester2
                 // LkpFromChase stays as-is — hearing alone doesn't mark it as a chase LKP
             }
 
-            if (_player != null) _lastPlayerPos = _player.position;
+            if (_player != null) _lastPlayerPos = _playerWorldPos;
+
+            AccumulateSuspicion(canSee, canHear);
 
             // Perception visualisation — visible in Game view when Gizmos are enabled.
             // Green  = player seen (in FOV + LOS clear)
@@ -332,9 +468,77 @@ namespace Semester2
             if (_player != null)
             {
                 Vector3 eye    = transform.position + Vector3.up * npcEyeHeight;
-                Vector3 target = _player.position   + Vector3.up * playerCenterHeight;
+                Vector3 target = _playerWorldPos    + Vector3.up * playerCenterHeight;
                 Color   rayCol = canSee ? Color.green : (canHear ? Color.yellow : Color.red);
                 Debug.DrawLine(eye, target, rayCol);
+            }
+        }
+
+        /// <summary>
+        /// Accumulates or decays suspicion based on partial player detection.
+        ///
+        /// Full sight (canSee = true) snaps suspicion to 1. Otherwise suspicion
+        /// rises when the player is heard OR is within range but outside the FOV
+        /// cone (peripheral awareness). It decays back to 0 when nothing is detected.
+        ///
+        /// When suspicion crosses SuspicionAlertThreshold the NPC records a
+        /// last-known position and resets the post-chase search cooldown, sending
+        /// it into the Search branch even without confirmed sight or audio.
+        /// </summary>
+        private void AccumulateSuspicion(bool canSee, bool canHear)
+        {
+            if (_player == null) return;
+
+            // Full visual contact → max suspicion (threat branch already handles this,
+            // but keeping suspicion in sync means the overlay always reflects reality).
+            if (canSee)
+            {
+                _blackboard.SuspicionLevel = 1f;
+                return;
+            }
+
+            float rise = 0f;
+
+            // Peripheral detection: player is within detection range but outside the FOV
+            // cone — the NPC notices movement at the edge of its vision.
+            float dist = _blackboard.DistanceToPlayer;
+            if (dist < detectionRange)
+            {
+                Vector3 dir   = (_playerWorldPos - transform.position).normalized;
+                float   angle = Vector3.Angle(transform.forward, dir);
+                float   half  = fieldOfViewAngle / 2f;
+
+                if (angle > half && angle < half * 2.5f)
+                {
+                    // Outside cone but still within a wide peripheral band
+                    float peripheralFraction = 1f - (angle - half) / (half * 1.5f);
+                    rise += Config.SuspicionRiseRate * peripheralFraction * 0.5f;
+                }
+            }
+
+            // Audio detection: hearing the player at any noise level raises suspicion.
+            // Scales with how loud the player is relative to the minimum threshold.
+            if (canHear && _audioEmitter != null)
+            {
+                float noiseFraction = Mathf.Clamp01(
+                    (_audioEmitter.CurrentNoiseLevel - minNoiseThreshold) / (1f - minNoiseThreshold));
+                rise += Config.SuspicionRiseRate * noiseFraction;
+            }
+
+            if (rise > 0f)
+                _blackboard.SuspicionLevel = Mathf.Clamp01(_blackboard.SuspicionLevel + rise * Time.deltaTime);
+            else
+                _blackboard.SuspicionLevel = Mathf.Clamp01(_blackboard.SuspicionLevel - Config.SuspicionDecayRate * Time.deltaTime);
+
+            // When suspicion crosses the threshold and we have no confirmed LKP yet,
+            // record an approximate last-known position and kick off the Search branch.
+            if (_blackboard.SuspicionLevel >= Config.SuspicionAlertThreshold
+                && !_blackboard.HasLastKnownPosition)
+            {
+                _blackboard.LastKnownPlayerPosition = _playerWorldPos;
+                _blackboard.HasLastKnownPosition    = true;
+                _postChaseSearchCooldown?.ResetCooldown();
+                Debug.Log($"[{name}] <color=yellow>Suspicion threshold reached — searching.</color>");
             }
         }
 
@@ -344,7 +548,9 @@ namespace Semester2
             // Must be larger than btTickInterval but smaller than two tick intervals.
             BtNode.ReEntryGap = btTickInterval * 1.5f;
 
-            var ctx = new NpcBtContext(gameObject, Config, _blackboard);
+            _btContext = new NpcBtContext(gameObject, Config, _blackboard);
+            _btContext.OnAttackFired = NotifyAttackFired;
+            var ctx = _btContext;
 
             _investigateAction = new BtActionInvestigate(ctx);
 
@@ -432,9 +638,49 @@ namespace Semester2
 
         void LateUpdate()
         {
-            // Only reapply investigate rotation while that branch is active
+            if (!_isAuthority) return;
+
+            // Re-apply Investigate rotation override (Animator root motion would fight it otherwise).
             if (_blackboard?.ActiveNodeName == "Investigate")
                 _investigateAction?.ReapplyRotation();
+
+            // Guaranteed final word on NPC position — runs after ALL Fusion Render() calls
+            // including NetworkTransform, so the navmesh position always wins over the
+            // one-tick-behind interpolated position that causes slow-motion NPC movement.
+            if (_navAgent != null && _navAgent.isActiveAndEnabled && _navAgent.isOnNavMesh)
+                transform.position = _navAgent.nextPosition;
+        }
+
+        /// <summary>
+        /// Called by BtActionAttack each time the NPC fires a shot (on state authority only).
+        /// Increments AttackTick so every peer's Render() detects the change and fires the
+        /// Attack animator trigger locally — syncing the shooting animation across all clients.
+        /// </summary>
+        public void NotifyAttackFired()
+        {
+            if (_isAuthority) AttackTick++;
+        }
+
+        public override void Render()
+        {
+            // Detect attack shots and fire the trigger on every client (including non-authority)
+            // so the shooting animation plays on P2's screen, not just the host.
+            if (_cd != null)
+            {
+                foreach (var change in _cd.DetectChanges(this))
+                {
+                    if (change == nameof(AttackTick) && _animator != null)
+                    {
+                        _animator.ResetTrigger("Attack");
+                        _animator.SetTrigger("Attack");
+                    }
+                }
+            }
+
+            // Best-effort position fix during Fusion's render pipeline in case NetworkTransform
+            // runs after this. LateUpdate() is the definitive override for the same frame.
+            if (_isAuthority && _navAgent != null && _navAgent.isActiveAndEnabled && _navAgent.isOnNavMesh)
+                transform.position = _navAgent.nextPosition;
         }
 
         // ── Public perception methods ──────────────────────────────────────────────
@@ -446,12 +692,12 @@ namespace Semester2
             if (DistanceToPlayer > detectionRange) return false;
             if (!requireLineOfSight) return true;
 
-            Vector3 dir   = (_player.position - transform.position).normalized;
+            Vector3 dir   = (_playerWorldPos - transform.position).normalized;
             float   angle = Vector3.Angle(transform.forward, dir);
             if (angle > fieldOfViewAngle / 2f) return false;
 
             Vector3 eye      = transform.position + Vector3.up * npcEyeHeight;
-            Vector3 target   = _player.position   + Vector3.up * playerCenterHeight;
+            Vector3 target   = _playerWorldPos    + Vector3.up * playerCenterHeight;
             Vector3 toTarget = target - eye;
 
             return !Physics.Raycast(eye, toTarget.normalized, toTarget.magnitude, obstacleLayerMask);
@@ -470,7 +716,7 @@ namespace Semester2
             // reduced range vertically. This stops NPCs on upper floors hearing the player
             // through a floor/ceiling gap even when straight-line distance is short.
             // Effective vertical radius = hearingRange / verticalHearingPenalty.
-            Vector3 toPlayer  = _player.position - transform.position;
+            Vector3 toPlayer  = _playerWorldPos - transform.position;
             float   hDist     = Mathf.Sqrt(toPlayer.x * toPlayer.x + toPlayer.z * toPlayer.z);
             float   vDist     = Mathf.Abs(toPlayer.y);
             float   vScaled   = vDist * Config.VerticalHearingPenalty;
@@ -487,7 +733,7 @@ namespace Semester2
             if (useOcclusionForSound)
             {
                 Vector3 eye       = transform.position + Vector3.up * npcEyeHeight;
-                Vector3 playerPos = _player.position   + Vector3.up * playerCenterHeight;
+                Vector3 playerPos = _playerWorldPos    + Vector3.up * playerCenterHeight;
                 Vector3 dir       = playerPos - eye;
                 if (Physics.Raycast(eye, dir.normalized, dir.magnitude, obstacleLayerMask))
                     effective *= soundOcclusionMult;
@@ -503,12 +749,24 @@ namespace Semester2
             NavMeshHit navHit;
             heardAt = NavMesh.SamplePosition(approxPos, out navHit, 3f, NavMesh.AllAreas)
                 ? navHit.position
-                : _player.position;
+                : _playerWorldPos;
 
             return true;
         }
 
         // ── Takedown ───────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Network entry point — call this from PlayerTakedownController on whichever
+        /// client triggered the takedown. Fusion routes the RPC through state authority
+        /// so every peer (host + all clients) runs StartTakedown locally and the NPC
+        /// actually dies for everyone, not just the killer's screen.
+        /// </summary>
+        [Rpc(RpcSources.All, RpcTargets.All)]
+        public void RPC_StartTakedown(float duration)
+        {
+            StartTakedown(duration);
+        }
 
         /// <summary>
         /// Called by PlayerTakedownController. Sets _isDead so the BT stops ticking.
@@ -518,11 +776,10 @@ namespace Semester2
             _isDead = true;
             Debug.Log($"[{name}] <color=magenta>Takedown triggered.</color>");
 
-            NavMeshAgent nav = GetComponent<NavMeshAgent>();
-            if (nav != null && nav.isActiveAndEnabled && nav.isOnNavMesh)
+            if (_navAgent != null && _navAgent.isActiveAndEnabled && _navAgent.isOnNavMesh)
             {
-                nav.isStopped = true;
-                nav.velocity  = Vector3.zero;
+                _navAgent.isStopped = true;
+                _navAgent.velocity  = Vector3.zero;
             }
 
             Animator anim = GetComponentInChildren<Animator>();
@@ -539,6 +796,132 @@ namespace Semester2
                 StartCoroutine(PlayFallAudio());
 
             StartCoroutine(DeactivateAfterDelay(duration));
+        }
+
+        /// <summary>
+        /// Scans ALL Player-tagged objects and picks the best threat target.
+        /// Priority: nearest visible player > nearest heard player > nearest overall.
+        /// This ensures a second player who walks up to the NPC is detected even when
+        /// another player is marginally closer in raw distance but hidden behind a wall.
+        /// </summary>
+        private void ResolvePlayerReference()
+        {
+            GameObject[] tagged = GameObject.FindGameObjectsWithTag("Player");
+            if (tagged.Length == 0) return;
+
+            var seen = new System.Collections.Generic.HashSet<NetworkObject>();
+
+            float              bestVisibleDist  = float.MaxValue;
+            Transform          bestVisible      = null;
+            NetworkObject      bestVisibleNo    = null;
+            PlayerAudioEmitter bestVisibleAudio = null;
+
+            float              bestHeardDist    = float.MaxValue;
+            Transform          bestHeard        = null;
+            NetworkObject      bestHeardNo      = null;
+            PlayerAudioEmitter bestHeardAudio   = null;
+
+            float              bestOverallDist  = float.MaxValue;
+            Transform          bestOverall      = null;
+            NetworkObject      bestOverallNo    = null;
+            PlayerAudioEmitter bestOverallAudio = null;
+
+            foreach (GameObject obj in tagged)
+            {
+                NetworkObject no = obj.GetComponentInParent<NetworkObject>()
+                                ?? obj.GetComponentInChildren<NetworkObject>();
+                if (no == null || !seen.Add(no)) continue;
+
+                // Use SyncedPosition (written by the owning client each tick) so the host
+                // sees the real in-game location of remote players, not their spawn point.
+                Vector3 candidatePos = GetSyncedPosition(no);
+                CharacterController cc = no.GetComponentInChildren<CharacterController>();
+                Transform candidate = cc != null ? cc.transform : no.transform;
+
+                float dist = Vector3.Distance(transform.position, candidatePos);
+                PlayerAudioEmitter emitter = no.GetComponentInChildren<PlayerAudioEmitter>();
+
+                if (dist < bestOverallDist)
+                {
+                    bestOverallDist  = dist;
+                    bestOverall      = candidate;
+                    bestOverallNo    = no;
+                    bestOverallAudio = emitter;
+                }
+
+                if (CanSeePlayerTarget(candidatePos) && dist < bestVisibleDist)
+                {
+                    bestVisibleDist  = dist;
+                    bestVisible      = candidate;
+                    bestVisibleNo    = no;
+                    bestVisibleAudio = emitter;
+                }
+                else if (bestVisible == null && emitter != null
+                         && emitter.CurrentNoiseLevel >= minNoiseThreshold
+                         && dist < bestHeardDist)
+                {
+                    bestHeardDist  = dist;
+                    bestHeard      = candidate;
+                    bestHeardNo    = no;
+                    bestHeardAudio = emitter;
+                }
+            }
+
+            Transform      pick    = bestVisible ?? bestHeard ?? bestOverall;
+            NetworkObject  pickNo  = bestVisible != null ? bestVisibleNo
+                                   : bestHeard   != null ? bestHeardNo
+                                   : bestOverallNo;
+            PlayerAudioEmitter pickAudio = bestVisible != null ? bestVisibleAudio
+                                        : bestHeard    != null ? bestHeardAudio
+                                        : bestOverallAudio;
+
+            if (pick == null) return;
+
+            if (_player != pick)
+                Debug.Log($"[{name}] <color=cyan>Player target: {(_player != null ? _player.name : "none")} → {pick.name}</color>");
+
+            _player         = pick;
+            _playerNo       = pickNo;
+            _playerWorldPos = GetSyncedPosition(pickNo);
+            _audioEmitter   = pickAudio;
+        }
+
+        /// <summary>
+        /// Lightweight visibility check against a specific transform — used by
+        /// ResolvePlayerReference to compare multiple players without writing to the blackboard.
+        /// </summary>
+        /// <summary>
+        /// Returns the best available world position for a player NetworkObject.
+        /// Reads NetworkPlayerSetup.SyncedPosition (updated by the owning client each
+        /// Fusion tick) so the host always gets P2's real in-game position, not the
+        /// static spawn position that NetworkTransform on the root would provide.
+        /// Falls back to the CharacterController child transform when Fusion is not active.
+        /// </summary>
+        private Vector3 GetSyncedPosition(NetworkObject no)
+        {
+            if (no == null) return Vector3.zero;
+            var nps = no.GetComponent<NetworkPlayerSetup>();
+            if (nps != null && nps.SyncedPosition != Vector3.zero)
+                return nps.SyncedPosition;
+            var cc = no.GetComponentInChildren<CharacterController>();
+            return cc != null ? cc.transform.position : no.transform.position;
+        }
+
+        private bool CanSeePlayerTarget(Vector3 targetPos)
+        {
+            float dist = Vector3.Distance(transform.position, targetPos);
+            if (dist > detectionRange) return false;
+
+            Vector3 dir   = (targetPos - transform.position).normalized;
+            float   angle = Vector3.Angle(transform.forward, dir);
+            if (angle > fieldOfViewAngle / 2f) return false;
+
+            if (!requireLineOfSight) return true;
+
+            Vector3 eye      = transform.position + Vector3.up * npcEyeHeight;
+            Vector3 tgt      = targetPos          + Vector3.up * playerCenterHeight;
+            Vector3 toTarget = tgt - eye;
+            return !Physics.Raycast(eye, toTarget.normalized, toTarget.magnitude, obstacleLayerMask);
         }
 
         private IEnumerator ActivateBtAfterDelay(float delay)
@@ -704,7 +1087,7 @@ namespace Semester2
         private void DrawLOSGizmo()
         {
             Vector3 eye    = transform.position + Vector3.up * npcEyeHeight;
-            Vector3 target = _player.position   + Vector3.up * playerCenterHeight;
+            Vector3 target = _playerWorldPos    + Vector3.up * playerCenterHeight;
             Vector3 dir    = target - eye;
             bool occluded  = Physics.Raycast(eye, dir.normalized, dir.magnitude, obstacleLayerMask);
             Gizmos.color   = occluded ? Color.red : Color.green;
