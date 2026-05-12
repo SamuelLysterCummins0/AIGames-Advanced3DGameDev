@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Test-Path \"C:\\\\Users\\\\samly\\\\.claude\\\\agent-memory\\\\student-voice-writer\\\\user_profile.md\")",
+      "Bash(ls -la \"/c/Users/samly/Downloads/slides.pptx\" 2>&1)",
+      "Bash(python -m markitdown slides.pptx)",
+      "Bash(pip install *)",
+      "Bash(python \"/c/Users/samly/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/72b9b334-a9cc-409c-9240-416ffd2069a8/24fa2dfd-2740-4628-8d9e-bd7ebd6dd191/skills/pptx/scripts/office/soffice.py\" --headless --convert-to pdf slides.pptx)",
+      "Bash(cp \"/c/Users/samly/Downloads/slides.pptx\" \"/c/Users/samly/Downloads/slides_backup.pptx\")",
+      "Bash(python /c/Users/samly/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/72b9b334-a9cc-409c-9240-416ffd2069a8/24fa2dfd-2740-4628-8d9e-bd7ebd6dd191/skills/pptx/scripts/office/unpack.py /c/Users/samly/Downloads/slides.pptx /c/Users/samly/Downloads/slides_unpacked/)",
+      "Bash(python -m markitdown \"/c/Users/samly/Downloads/slides.pptx\")",
+      "Bash(xxd)",
+      "Bash(python \"/c/Users/samly/Downloads/edit_slides4.py\")",
+      "Bash(rm -f \"/c/Users/samly/Downloads/edit_slides2.py\" \"/c/Users/samly/Downloads/edit_slides3.py\" \"/c/Users/samly/Downloads/edit_slides4.py\" \"/c/Users/samly/Downloads/edit_slides.py\")",
+      "Bash(rm -rf \"/c/Users/samly/Downloads/slides_unpacked\")",
+      "Bash(find \"/c/Users/samly/Desktop/College/4.Year4/Semester2/AIGames-Advanced3DGameDev/AIForGames-AdvancedGameDev2026/AIGames-Advanced3DGameDev/Docs-Advanced3DDev/CA3\" -type f 2>&1; echo \"---\"; ls \"/c/Users/samly/Downloads/\" | grep -iE \"slides|advanced|3D|deck\" 2>&1)",
+      "Read(//c/Users/samly/Desktop/College/4.Year4/Semester2/AIGames-Advanced3DGameDev/AIForGames-AdvancedGameDev2026/AIGames-Advanced3DGameDev/**)",
+      "Bash(python3)",
+      "Bash(find \"/c/Users/samly/Desktop/College/4.Year4/Semester2/AIGames-Advanced3DGameDev/AIForGames-AdvancedGameDev2026\" -maxdepth 3 -iname \"README*\" 2>/dev/null)"
+    ]
+  }
+}

@@ -163,13 +163,17 @@ namespace Semester2
                 $"Reinforcing: {reinStr}", _labelStyle);
             y += lineHeight;
 
-            // Suspicion level — bar + numeric value
-            float suspicion      = bb?.SuspicionLevel ?? 0f;
-            Color suspicionColor = Color.Lerp(Color.green, Color.red, suspicion);
-            string suspHex       = ColorUtility.ToHtmlStringRGB(suspicionColor);
-            string suspBar       = BuildBar(suspicion, 16);
+            // Spot timer — replaces the old suspicion bar. Fills while the player is
+            // visible; fill rate scales with distance and angle. Crosses the Search
+            // threshold (NPC investigates) before the Chase threshold (NPC engages).
+            float spot      = bb?.SpotTimer ?? 0f;
+            float spotMax   = _controller?.Config?.SpotTimerChaseThreshold ?? 3f;
+            float spotPct   = spotMax > 0f ? Mathf.Clamp01(spot / spotMax) : 0f;
+            Color spotCol   = Color.Lerp(Color.green, Color.red, spotPct);
+            string spotHex  = ColorUtility.ToHtmlStringRGB(spotCol);
+            string spotBar  = BuildBar(spotPct, 16);
             GUI.Label(new Rect(x, y, panelWidth - 20f, lineHeight),
-                $"Suspicion: <color=#{suspHex}>{suspBar} {suspicion:P0}</color>", _labelStyle);
+                $"Spot: <color=#{spotHex}>{spotBar} {spot:F1}s / {spotMax:F1}s</color>", _labelStyle);
             y += lineHeight;
 
             // Current noise level emitted by the player (perception input, not NPC output)

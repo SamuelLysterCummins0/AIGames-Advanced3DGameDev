@@ -2200,7 +2200,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f584961c96fd00f47a879bc43cdc956e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Semester2.MinimalisticFSMExample
-  detectionRange: 11
+  detectionRange: 14
   attackRange: 6.5
   fieldOfViewAngle: 90
   requireLineOfSight: 1
@@ -2248,7 +2248,7 @@ MonoBehaviour:
   searchPointCount: 4
   maxSearchDuration: 15
   searchPauseDuration: 1.5
-  reinforceRange: 15
+  reinforceRange: 20
   reinforceAlertInterval: 2
   npcDeathTrigger: Death
   deathAudioSource: {fileID: 2258845749783793128}
@@ -2257,6 +2257,13 @@ MonoBehaviour:
   suspicionRiseRate: 0.35
   suspicionDecayRate: 0.15
   suspicionAlertThreshold: 0.6
+  spotTimerChaseThreshold: 3
+  spotBaseRate: 1
+  spotDrainRate: 1.5
+  spotCloseDistanceMultiplier: 3.5
+  spotFarDistanceMultiplier: 0.4
+  spotCentreAngleMultiplier: 1.5
+  spotEdgeAngleMultiplier: 0.6
   btTickInterval: 0.1
   showFieldOfView: 1
   showDetectionRaycast: 1

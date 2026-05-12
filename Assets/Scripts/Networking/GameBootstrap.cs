@@ -83,7 +83,7 @@ namespace Semester2
 
         private async void Start()
         {
-            await SignInAsync();
+            //await SignInAsync();
             JoinLobby();
         }
 
@@ -448,10 +448,20 @@ namespace Semester2
         // StarterAssetsInputs.OnApplicationFocus locks the cursor whenever the window
         // gains focus (cursorLocked defaults to true). Re-assert the correct state here
         // so the lobby cursor stays visible even when the editor Game view is clicked.
+        // Also force the lobby cursor while the game is over (Win/Defeat) so the player
+        // can actually click the restart button — otherwise this method snatches the
+        // cursor back from GameManager.ShowCursor on every focus event.
         private void OnApplicationFocus(bool hasFocus)
         {
             if (!hasFocus) return;
-            if (_sessionActive)
+
+            // Default to NOT locking the cursor when GameManager isn't available — better
+            // a stuck-visible cursor than a stuck-locked one that traps the dead player.
+            bool gameOver = GameManager.Instance == null
+                            || GameManager.Instance.State == GameState.Win
+                            || GameManager.Instance.State == GameState.Defeat;
+
+            if (_sessionActive && !gameOver)
                 SetGameplayCursor();
             else
                 SetLobbyCursor();

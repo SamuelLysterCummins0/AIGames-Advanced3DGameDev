@@ -80,13 +80,23 @@ namespace Semester2
         public float LosLostThreshold      { get; set; }
         public float AttackDamage          { get; set; }
 
-        // Suspicion accumulation
-        // Rise: per-second increase when the player is partially detected (peripheral/heard).
-        // Decay: per-second decrease when nothing is detected.
-        // AlertThreshold: 0-1 level at which the NPC sets a LKP and begins searching.
+        // Suspicion accumulation (legacy — replaced by SpotTimer below; kept on the
+        // config for compatibility with any old code that still reads it).
         public float SuspicionRiseRate       { get; set; }
         public float SuspicionDecayRate      { get; set; }
         public float SuspicionAlertThreshold { get; set; }
+
+        // Spot Timer — distance/angle-scaled "time-to-spot" mechanic.
+        // Replaces the gradient suspicion system. Search fires at the lower
+        // threshold, Chase fires at the upper threshold.
+        public float SpotTimerSearchThreshold     { get; set; }  // seconds, lower bound for Search
+        public float SpotTimerChaseThreshold      { get; set; }  // seconds, upper bound for Chase
+        public float SpotBaseRate                 { get; set; }  // /sec, baseline before multipliers
+        public float SpotDrainRate                { get; set; }  // /sec, drain when player hidden
+        public float SpotCloseDistanceMultiplier  { get; set; }  // rate × at point-blank
+        public float SpotFarDistanceMultiplier    { get; set; }  // rate × at detection range
+        public float SpotCentreAngleMultiplier    { get; set; }  // rate × dead centre
+        public float SpotEdgeAngleMultiplier      { get; set; }  // rate × at FOV cone edge
 
         /// <summary>
         /// Creates default configuration values.
@@ -136,7 +146,16 @@ namespace Semester2
                 AttackDamage            = 34f,
                 SuspicionRiseRate       = 0.35f,
                 SuspicionDecayRate      = 0.15f,
-                SuspicionAlertThreshold = 0.6f
+                SuspicionAlertThreshold = 0.6f,
+
+                SpotTimerSearchThreshold    = 1.5f,
+                SpotTimerChaseThreshold     = 3.0f,
+                SpotBaseRate                = 1.0f,
+                SpotDrainRate               = 2.0f,
+                SpotCloseDistanceMultiplier = 4.0f,
+                SpotFarDistanceMultiplier   = 0.4f,
+                SpotCentreAngleMultiplier   = 1.5f,
+                SpotEdgeAngleMultiplier     = 0.6f
             };
         }
     }

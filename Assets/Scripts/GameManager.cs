@@ -132,14 +132,17 @@ namespace Semester2
                 case GameState.Win:
                     if (goalText != null) goalText.text = "";
                     if (winPanel != null) winPanel.SetActive(true);
-                    Time.timeScale = 0f;
+                    // Don't pause Time.timeScale — in multiplayer the host's NPCs run
+                    // on the host's simulation, so pausing time here freezes NPCs on
+                    // the surviving client too. The dead player's controls are disabled
+                    // by ShowCursor, so they can't affect the world while spectating.
                     ShowCursor();
                     break;
 
                 case GameState.Defeat:
                     if (goalText  != null) goalText.text = "";
                     if (losePanel != null) losePanel.SetActive(true);
-                    Time.timeScale = 0f;
+                    // Same reasoning as Win — don't pause time in multiplayer.
                     ShowCursor();
                     break;
             }
@@ -150,9 +153,10 @@ namespace Semester2
         /// <summary>
         /// Unlocks and shows the cursor and disables FPS look so the player
         /// can click UI buttons on the win/lose screen.
-        /// Disables ALL FirstPersonControllers in the scene — in multiplayer
-        /// FindObjectOfType can return the remote player's (already-disabled) FPC,
-        /// leaving the local player's FPC running and re-locking the cursor every frame.
+        /// Disables ALL FirstPersonControllers AND StarterAssetsInputs in the scene —
+        /// both have their own re-lock paths (FPC ticks every frame, Inputs locks on
+        /// OnApplicationFocus) so disabling only one of them lets the other steal the
+        /// cursor back the moment the player clicks anywhere on the lose screen.
         /// </summary>
         private void ShowCursor()
         {
@@ -161,6 +165,9 @@ namespace Semester2
 
             foreach (var fpc in FindObjectsByType<FirstPersonController>(FindObjectsSortMode.None))
                 fpc.enabled = false;
+
+            foreach (var inputs in FindObjectsByType<StarterAssets.StarterAssetsInputs>(FindObjectsSortMode.None))
+                inputs.enabled = false;
         }
     }
 }

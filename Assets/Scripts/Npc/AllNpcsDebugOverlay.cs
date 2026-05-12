@@ -26,7 +26,7 @@ namespace Semester2
         private const float COL_WIDTH  = 300f;
         private const float ROW_HEIGHT = 20f;
         private const float PADDING    = 8f;
-        private const float PANEL_H    = 185f;  // enough for 8 rows
+        private const float PANEL_H    = 205f;  // enough for 9 rows (added Spot timer)
 
         void Start()
         {
@@ -39,6 +39,7 @@ namespace Semester2
                 _agents[i] = _npcs[i].GetComponent<NavMeshAgent>();
                 _pathLines[i] = CreatePathLine(_npcs[i].gameObject);
             }
+
         }
 
         private LineRenderer CreatePathLine(GameObject parent)
@@ -132,6 +133,21 @@ namespace Semester2
                     $"Distance: {dist:F1}m   Has LKP: {lkp}", _labelStyle);
                 y += ROW_HEIGHT;
 
+                // Spot Timer — segmented bar showing time-to-spot. Crosses Search threshold
+                // first (NPC investigates), then Chase threshold (NPC engages).
+                float  spot     = bb?.SpotTimer ?? 0f;
+                float  spotMax  = npc.Config != null ? npc.Config.SpotTimerChaseThreshold : 3f;
+                float  spotSrch = npc.Config != null ? npc.Config.SpotTimerSearchThreshold : 1.5f;
+                float  spotPct  = spotMax > 0f ? Mathf.Clamp01(spot / spotMax) : 0f;
+                Color  spotCol  = spot >= spotMax  ? Color.red
+                                : spot >= spotSrch ? Color.yellow
+                                : Color.Lerp(Color.green, Color.yellow, spotPct);
+                string spotHex  = ColorUtility.ToHtmlStringRGB(spotCol);
+                string spotBar  = BuildSpotBar(spot, spotSrch, spotMax, 14);
+                GUI.Label(new Rect(colX, y, COL_WIDTH - 8f, ROW_HEIGHT),
+                    $"Spot: <color=#{spotHex}>{spotBar} {spot:F1}s</color>", _labelStyle);
+                y += ROW_HEIGHT;
+
                 // PowerBox
                 string pb = (bb?.PowerBoxActive ?? false)
                     ? "<color=#ff8800>ACTIVE</color>" : "<color=#555555>none</color>";
@@ -208,6 +224,30 @@ namespace Semester2
             tex.SetPixels(px);
             tex.Apply();
             return tex;
+        }
+
+        /// <summary>
+        /// Builds a fixed-width progress bar with a vertical bar marker showing the
+        /// Search threshold position. Lets the viewer see at a glance how close the
+        /// timer is to triggering Search vs Chase.
+        /// </summary>
+        private static string BuildSpotBar(float value, float searchThreshold, float chaseThreshold, int width)
+        {
+            int filled = Mathf.Clamp(Mathf.RoundToInt((value / chaseThreshold) * width), 0, width);
+            int marker = Mathf.Clamp(Mathf.RoundToInt((searchThreshold / chaseThreshold) * width), 0, width - 1);
+
+            System.Text.StringBuilder sb = new System.Text.StringBuilder("[", width + 2);
+            for (int i = 0; i < width; i++)
+            {
+                if (i == marker)
+                    sb.Append('|');                         // Search threshold marker
+                else if (i < filled)
+                    sb.Append('█');
+                else
+                    sb.Append('░');
+            }
+            sb.Append(']');
+            return sb.ToString();
         }
 
         private static Color NodeColour(string name)

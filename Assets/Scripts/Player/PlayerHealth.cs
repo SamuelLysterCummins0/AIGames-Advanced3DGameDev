@@ -30,6 +30,10 @@ namespace Semester2
         // Networked health — StateAuthority writes it, all peers read it.
         [Networked] private float Health { get; set; }
 
+        // Networked death flag — set by the dying player's StateAuthority, read by every
+        // peer (so the host's NPCs can stop targeting a player who's already down).
+        [Networked] private NetworkBool IsDeadNet { get; set; }
+
         // Non-networked fallback used when Fusion is not running (e.g. scene testing).
         private float _localHealth;
 
@@ -135,6 +139,14 @@ namespace Semester2
         private void Die()
         {
             _isDead = true;
+
+            // Mirror to the networked flag so every peer sees this player is down —
+            // the host's NPC perception reads this to stop chasing a dead player.
+            // Only the StateAuthority can write [Networked] fields. In Shared Mode each
+            // player is their own state authority so this just works.
+            if (Runner != null && HasStateAuthority)
+                IsDeadNet = true;
+
             Debug.Log("[PlayerHealth] <color=red>Player died!</color>");
 
             if (GameManager.Instance != null)
@@ -151,7 +163,13 @@ namespace Semester2
             }
         }
 
-        /// <summary>True after health reaches zero.</summary>
-        public bool IsDead => _isDead;
+        /// <summary>
+        /// True after health reaches zero. Returns the networked value when running
+        /// under Fusion (so the host's NPCs see remote players' death state correctly),
+        /// falls back to the local flag when not networked.
+        /// </summary>
+        public bool IsDead => (Runner != null && Object != null && Object.IsValid)
+                              ? (bool)IsDeadNet
+                              : _isDead;
     }
 }

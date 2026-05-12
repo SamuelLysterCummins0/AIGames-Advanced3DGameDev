@@ -58,9 +58,13 @@ namespace Semester2
             _wasHearingLastTick   = false;
             _lastSoundTrackUpdate = 0f;
 
-            // trackingActive is true when sound is ongoing OR when reinforcement alerts
-            // are still arriving from a chasing NPC. Both cases use live LKP navigation.
-            bool trackingActive = _ctx.Blackboard.PlayerHeard || _ctx.Blackboard.ReinforcementTracking;
+            // trackingActive is true when sound is ongoing, reinforcement alerts are
+            // still arriving from a chasing NPC, OR when this NPC is currently visually
+            // tracking the player above the Search threshold. All three cases use live
+            // LKP navigation rather than fan-searching from a stale starting position.
+            bool trackingActive = _ctx.Blackboard.PlayerHeard
+                                  || _ctx.Blackboard.ReinforcementTracking
+                                  || _ctx.Blackboard.SpotTracking;
             if (trackingActive)
             {
                 // Navigate toward the live last-known position (updated each alert / each heard tick)
@@ -90,10 +94,14 @@ namespace Semester2
             }
 
             // ── Live-tracking mode ─────────────────────────────────────────────────
-            // Active while the player is heard OR while reinforcement alerts keep arriving
-            // from a chasing NPC. Navigates toward the current LKP each tick so this NPC
-            // follows the chase area rather than fanning around a stale first position.
-            bool trackingActive = _ctx.Blackboard.PlayerHeard || _ctx.Blackboard.ReinforcementTracking;
+            // Active while the player is heard, while reinforcement alerts keep arriving
+            // from a chasing NPC, OR while this NPC is currently visually tracking the
+            // player above the Search threshold. Navigates toward the current LKP each
+            // tick so the search follows the player rather than fanning around a stale
+            // first position.
+            bool trackingActive = _ctx.Blackboard.PlayerHeard
+                                  || _ctx.Blackboard.ReinforcementTracking
+                                  || _ctx.Blackboard.SpotTracking;
             if (trackingActive)
             {
                 _wasHearingLastTick = true;

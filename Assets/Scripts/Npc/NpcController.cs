@@ -102,7 +102,7 @@ namespace Semester2
         [Header("NPC Reinforcement Settings")]
         [Tooltip("Ellipsoid distance (same vertical flattening as hearing) within which this NPC receives " +
                  "another NPC's chase alert and heads to the area as reinforcement.")]
-        [SerializeField] private float reinforceRange = 15f;
+        [SerializeField] private float reinforceRange = 8f;
         [Tooltip("While chasing the player, how often (seconds) this NPC re-broadcasts its alert " +
                  "so nearby NPCs keep getting updated last-known positions as the player moves.")]
         [SerializeField] private float reinforceAlertInterval = 2f;
@@ -113,14 +113,33 @@ namespace Semester2
         [SerializeField] private AudioClip   fallClip;
         [SerializeField] private float       fallSoundDelay = 1.8f;
 
-        [Header("Suspicion Settings")]
-        [Tooltip("How fast (per second) suspicion rises when the player is partially detected (peripheral vision or heard).")]
+        [Header("Suspicion Settings (legacy)")]
+        [Tooltip("Legacy fields kept for inspector compatibility. The active detection " +
+                 "system is now the Spot Timer below.")]
         [SerializeField] private float suspicionRiseRate       = 0.35f;
-        [Tooltip("How fast (per second) suspicion decays when nothing is detected.")]
         [SerializeField] private float suspicionDecayRate      = 0.15f;
-        [Tooltip("Suspicion level (0-1) at which the NPC sets a last-known position and begins searching.")]
         [Range(0f, 1f)]
         [SerializeField] private float suspicionAlertThreshold = 0.6f;
+
+        [Header("Spot Timer Settings")]
+        [Tooltip("Seconds of accumulated visibility at which the NPC commits to Chase. " +
+                 "The Search threshold is fixed at half this value, so Search always fires " +
+                 "at the midpoint of the spot bar.")]
+        [SerializeField] private float spotTimerChaseThreshold  = 3.0f;
+        [Tooltip("Baseline timer fill rate (per second) before distance and angle multipliers are applied.")]
+        [SerializeField] private float spotBaseRate             = 1.0f;
+        [Tooltip("Per-second drain rate when the player is not visible. Higher = faster fade-out.")]
+        [SerializeField] private float spotDrainRate            = 2.0f;
+
+        [Header("Spot Timer Falloff")]
+        [Tooltip("Fill rate multiplier when the player is at point-blank range (1m or closer).")]
+        [SerializeField] private float spotCloseDistanceMultiplier = 4.0f;
+        [Tooltip("Fill rate multiplier when the player is at the far edge of the detection range.")]
+        [SerializeField] private float spotFarDistanceMultiplier   = 0.4f;
+        [Tooltip("Fill rate multiplier when the player is dead-centre in the NPC's forward vision.")]
+        [SerializeField] private float spotCentreAngleMultiplier   = 1.5f;
+        [Tooltip("Fill rate multiplier when the player is at the edge of the FOV cone.")]
+        [SerializeField] private float spotEdgeAngleMultiplier     = 0.6f;
 
         [Header("Performance")]
         [Tooltip("How often the BT ticks in seconds. 0.1 = 10 times per second. Lower = more responsive but more CPU.")]
@@ -310,7 +329,18 @@ namespace Semester2
                 AttackDamage             = attackDamage,
                 SuspicionRiseRate        = suspicionRiseRate,
                 SuspicionDecayRate       = suspicionDecayRate,
-                SuspicionAlertThreshold  = suspicionAlertThreshold
+                SuspicionAlertThreshold  = suspicionAlertThreshold,
+
+                // Search threshold is always half the Chase threshold — derived rather
+                // than exposed separately so they can never drift out of sync.
+                SpotTimerSearchThreshold    = spotTimerChaseThreshold * 0.5f,
+                SpotTimerChaseThreshold     = spotTimerChaseThreshold,
+                SpotBaseRate                = spotBaseRate,
+                SpotDrainRate               = spotDrainRate,
+                SpotCloseDistanceMultiplier = spotCloseDistanceMultiplier,
+                SpotFarDistanceMultiplier   = spotFarDistanceMultiplier,
+                SpotCentreAngleMultiplier   = spotCentreAngleMultiplier,
+                SpotEdgeAngleMultiplier     = spotEdgeAngleMultiplier
             };
 
             ResolvePlayerReference();
@@ -406,14 +436,45 @@ namespace Semester2
             bool wasVisible = _blackboard.PlayerVisible;
             bool canSee     = CanSeePlayer();
 
-            // Grace period: keep PlayerVisible true for 0.5 s after LOS is lost.
-            // SyncedPosition updates at ~30 Hz so the position can be one tick stale,
-            // causing brief LOS failures when P2 is near a wall — without this the NPC
-            // flickers between Attack and Search every ~50 ms.
-            if (canSee) _sightConfirmedUntil = Time.time + 0.5f;
-            _blackboard.PlayerVisible = canSee || Time.time < _sightConfirmedUntil;
+            // ── Spot Timer ─────────────────────────────────────────────────────────
+            // Replaces the old binary "in cone = spotted" with a time-to-spot mechanic.
+            // Fill rate scales with distance and angle off-centre — point-blank centre
+            // fills it in ~0.25s, edge-of-cone at long range takes 5+ seconds.
+            // The Search threshold sets a LKP for the Search branch; the Chase
+            // threshold (higher) sets PlayerVisible for the Threat branch.
+            if (canSee)
+            {
+                float dist     = _blackboard.DistanceToPlayer;
+                Vector3 toP    = (_playerWorldPos - transform.position).normalized;
+                float angleDeg = Vector3.Angle(transform.forward, toP);
 
-            if (canSee && _player != null)
+                // Distance multiplier: lerp from CloseMult at 1m to FarMult at detection range
+                float distT  = Mathf.InverseLerp(1f, detectionRange, dist);
+                float distMul = Mathf.Lerp(spotCloseDistanceMultiplier, spotFarDistanceMultiplier, distT);
+
+                // Angle multiplier: lerp from CentreMult at 0° to EdgeMult at half-FOV
+                float halfFov = fieldOfViewAngle * 0.5f;
+                float angleT  = Mathf.InverseLerp(0f, halfFov, angleDeg);
+                float angMul  = Mathf.Lerp(spotCentreAngleMultiplier, spotEdgeAngleMultiplier, angleT);
+
+                float rate = spotBaseRate * distMul * angMul;
+                _blackboard.SpotTimer = Mathf.Min(_blackboard.SpotTimer + rate * Time.deltaTime,
+                                                  spotTimerChaseThreshold);
+
+                // 0.3s grace before draining starts on next out-of-sight frame, so a
+                // single-frame LOS dropout from network jitter doesn't unfairly drain the timer.
+                _sightConfirmedUntil = Time.time + 0.3f;
+            }
+            else if (Time.time >= _sightConfirmedUntil)
+            {
+                _blackboard.SpotTimer = Mathf.Max(_blackboard.SpotTimer - spotDrainRate * Time.deltaTime, 0f);
+            }
+
+            // Search threshold — sets LKP. Only refresh while currently visible so the
+            // NPC investigates where they last saw you, not where you actually are now.
+            float searchThreshold = spotTimerChaseThreshold * 0.5f;
+            bool  hadLkpAlready   = _blackboard.HasLastKnownPosition;
+            if (canSee && _blackboard.SpotTimer >= searchThreshold && _player != null)
             {
                 // Track player movement direction for directional search points
                 Vector3 vel = (_playerWorldPos - _lastPlayerPos) / Time.deltaTime;
@@ -424,6 +485,14 @@ namespace Semester2
                 _blackboard.HasLastKnownPosition    = true;
                 _blackboard.LkpFromChase            = true; // visual contact — defer Investigate
 
+                // Reset the post-chase search cooldown the moment the spot timer first
+                // crosses the Search threshold. Without this, an NPC that's already
+                // searched once in this session will ignore the new visual spot because
+                // the cooldown decorator is still blocking the branch — same fix that
+                // was already in place for hearing-triggered searches.
+                if (!hadLkpAlready)
+                    _postChaseSearchCooldown?.ResetCooldown();
+
                 // Alert nearby NPCs: on first spot and periodically while chasing,
                 // so reinforcing NPCs keep getting an updated last-known position.
                 if (!wasVisible || Time.time - _lastAlertBroadcastTime >= reinforceAlertInterval)
@@ -432,6 +501,17 @@ namespace Semester2
                     _lastAlertBroadcastTime = Time.time;
                 }
             }
+
+            // Chase threshold — drives the Threat branch. Once the timer drops below
+            // this, PlayerVisible flips off and the BT falls through to the Search
+            // branch (which is already running because the LKP is set).
+            _blackboard.PlayerVisible = _blackboard.SpotTimer >= spotTimerChaseThreshold;
+
+            // Spot-tracking — true while the NPC is actively seeing the player above
+            // the Search threshold. BtActionSearch reads this to switch to live-tracking
+            // mode so an in-progress fan search snaps over to the player's current
+            // position instead of continuing to walk to the original (stale) LKP.
+            _blackboard.SpotTracking = canSee && _blackboard.SpotTimer >= searchThreshold;
 
             Vector3 heardAt;
             bool canHear = CanHearPlayer(out heardAt);
@@ -459,8 +539,6 @@ namespace Semester2
 
             if (_player != null) _lastPlayerPos = _playerWorldPos;
 
-            AccumulateSuspicion(canSee, canHear);
-
             // Perception visualisation — visible in Game view when Gizmos are enabled.
             // Green  = player seen (in FOV + LOS clear)
             // Yellow = player heard but not seen
@@ -474,73 +552,10 @@ namespace Semester2
             }
         }
 
-        /// <summary>
-        /// Accumulates or decays suspicion based on partial player detection.
-        ///
-        /// Full sight (canSee = true) snaps suspicion to 1. Otherwise suspicion
-        /// rises when the player is heard OR is within range but outside the FOV
-        /// cone (peripheral awareness). It decays back to 0 when nothing is detected.
-        ///
-        /// When suspicion crosses SuspicionAlertThreshold the NPC records a
-        /// last-known position and resets the post-chase search cooldown, sending
-        /// it into the Search branch even without confirmed sight or audio.
-        /// </summary>
-        private void AccumulateSuspicion(bool canSee, bool canHear)
-        {
-            if (_player == null) return;
-
-            // Full visual contact → max suspicion (threat branch already handles this,
-            // but keeping suspicion in sync means the overlay always reflects reality).
-            if (canSee)
-            {
-                _blackboard.SuspicionLevel = 1f;
-                return;
-            }
-
-            float rise = 0f;
-
-            // Peripheral detection: player is within detection range but outside the FOV
-            // cone — the NPC notices movement at the edge of its vision.
-            float dist = _blackboard.DistanceToPlayer;
-            if (dist < detectionRange)
-            {
-                Vector3 dir   = (_playerWorldPos - transform.position).normalized;
-                float   angle = Vector3.Angle(transform.forward, dir);
-                float   half  = fieldOfViewAngle / 2f;
-
-                if (angle > half && angle < half * 2.5f)
-                {
-                    // Outside cone but still within a wide peripheral band
-                    float peripheralFraction = 1f - (angle - half) / (half * 1.5f);
-                    rise += Config.SuspicionRiseRate * peripheralFraction * 0.5f;
-                }
-            }
-
-            // Audio detection: hearing the player at any noise level raises suspicion.
-            // Scales with how loud the player is relative to the minimum threshold.
-            if (canHear && _audioEmitter != null)
-            {
-                float noiseFraction = Mathf.Clamp01(
-                    (_audioEmitter.CurrentNoiseLevel - minNoiseThreshold) / (1f - minNoiseThreshold));
-                rise += Config.SuspicionRiseRate * noiseFraction;
-            }
-
-            if (rise > 0f)
-                _blackboard.SuspicionLevel = Mathf.Clamp01(_blackboard.SuspicionLevel + rise * Time.deltaTime);
-            else
-                _blackboard.SuspicionLevel = Mathf.Clamp01(_blackboard.SuspicionLevel - Config.SuspicionDecayRate * Time.deltaTime);
-
-            // When suspicion crosses the threshold and we have no confirmed LKP yet,
-            // record an approximate last-known position and kick off the Search branch.
-            if (_blackboard.SuspicionLevel >= Config.SuspicionAlertThreshold
-                && !_blackboard.HasLastKnownPosition)
-            {
-                _blackboard.LastKnownPlayerPosition = _playerWorldPos;
-                _blackboard.HasLastKnownPosition    = true;
-                _postChaseSearchCooldown?.ResetCooldown();
-                Debug.Log($"[{name}] <color=yellow>Suspicion threshold reached — searching.</color>");
-            }
-        }
+        // AccumulateSuspicion() removed — replaced by the Spot Timer system in
+        // UpdatePerception(). The new system is a single, readable mechanic that
+        // factors distance and angle into a time-to-spot fill rate, with two
+        // thresholds driving Search and Chase. No gradient suspicion is needed.
 
         private void BuildBehaviourTree()
         {
@@ -831,6 +846,13 @@ namespace Semester2
                 NetworkObject no = obj.GetComponentInParent<NetworkObject>()
                                 ?? obj.GetComponentInChildren<NetworkObject>();
                 if (no == null || !seen.Add(no)) continue;
+
+                // Skip dead players — IsDead is a [Networked] flag on PlayerHealth so
+                // every peer sees it. Without this filter, after one of two players
+                // dies the NPC keeps targeting the dead player's frozen capsule and
+                // ignores the surviving player.
+                PlayerHealth health = no.GetComponentInChildren<PlayerHealth>();
+                if (health != null && health.IsDead) continue;
 
                 // Use SyncedPosition (written by the owning client each tick) so the host
                 // sees the real in-game location of remote players, not their spawn point.

@@ -25,6 +25,14 @@ namespace Semester2
         private Transform           _capsule; // PlayerCapsule child — this is what actually moves
         private PlayerAudioEmitter  _audioEmitter;
 
+        // Smoothed remote-player position. SyncedPosition only updates on Fusion ticks
+        // (30 Hz default) but we render at 60+ FPS, so without smoothing the visible
+        // capsule on remote peers steps in chunks. SmoothDamp converges in ~50 ms which
+        // is barely perceptible while still tracking close to the live position.
+        private Vector3             _smoothVelocity;
+        private const float         SMOOTH_TIME       = 0.05f;
+        private const float         TELEPORT_DISTANCE = 5f; // beyond this, snap rather than smear
+
         /// <summary>
         /// World position of the PlayerCapsule, synced every Fusion tick by the local client.
         /// The NetworkObject root never moves (CharacterController.Move() drives the capsule
@@ -132,6 +140,41 @@ namespace Semester2
             // CharacterController.velocity is only meaningful on the owning client.
             if (_audioEmitter != null)
                 SyncedNoiseLevel = _audioEmitter.LocalNoiseLevel;
+        }
+
+        /// <summary>
+        /// Drive the visible capsule from SyncedPosition on remote peers. The
+        /// CharacterController only runs on the input-authority client — on every
+        /// other peer the capsule transform never updates by itself, so without this
+        /// remote players would visually freeze at spawn. Runs in Update so the visible
+        /// movement matches the local render frame rate rather than the Fusion tick.
+        /// </summary>
+        private void Update()
+        {
+            // Gate on Object.IsValid — [Networked] fields throw if read before Spawned().
+            // Update fires from the first frame the GameObject is enabled, which is
+            // before Fusion has finished spawning the network object on this client.
+            if (Object == null || !Object.IsValid) return;
+            if (HasInputAuthority) return;          // local player drives their own movement
+            if (_capsule == null) return;
+            if (SyncedPosition == Vector3.zero) return; // not yet seeded by the owning client
+
+            // Snap if the gap is large (respawn, teleport etc.) — otherwise SmoothDamp
+            // will smear the capsule across the level for half a second.
+            if (Vector3.Distance(_capsule.position, SyncedPosition) > TELEPORT_DISTANCE)
+            {
+                _capsule.position = SyncedPosition;
+                _smoothVelocity   = Vector3.zero;
+                return;
+            }
+
+            // Normal play — soft-track the synced position. Removes the per-frame chunky
+            // movement that comes from reading a 30 Hz value at 60+ FPS.
+            _capsule.position = Vector3.SmoothDamp(
+                _capsule.position,
+                SyncedPosition,
+                ref _smoothVelocity,
+                SMOOTH_TIME);
         }
     }
 }
